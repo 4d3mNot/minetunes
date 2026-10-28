@@ -1,0 +1,33 @@
+{
+	"schemaVersion": 1,
+	"id": "musicdeck",
+	"version": "${version}",
+	"name": "MineTunes",
+	"description": "A now-playing card on your HUD and in-game media controls for whatever Windows is playing - Spotify, YouTube, a podcast, anything. Play/pause, skip, seek and album art, over the Windows (SMTC) media session.",
+	"authors": [
+		"4d3m"
+	],
+	"license": "MIT",
+	"environment": "client",
+	"icon": "assets/musicdeck/icon.png",
+	"entrypoints": {
+		"main": [
+			"com.musicdeck.MusicDeck"
+		],
+		"client": [
+			"com.musicdeck.client.MusicDeckClient"
+		],
+		"modmenu": [
+			"com.musicdeck.client.MusicDeckModMenu"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.2",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
+	}
+}
