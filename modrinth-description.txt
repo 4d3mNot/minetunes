@@ -124,8 +124,8 @@ BEFORE YOU SAVE THE PAGE
 5. Upload `publish/minetunes-banner.png` as the gallery banner and `publish/minetunes-icon.png` if
    the page asks for a square icon; the jar already carries the 128px version. Gallery shots:
    `docs/card-left.png`, `docs/card-right.png`, `docs/lyrics.png`, `docs/lyrics-placed.png`.
-6. Upload one file per Minecraft version and tick only that version on it: `minetunes-1.0.0.jar`
-   (1.21.11), `minetunes-1.0.0+26.1.2.jar`, `+26.2`, `+26.3`. They share one project and one page;
+6. Upload one file per Minecraft version and tick only that version on it: `minetunes-1.1.0.jar`
+   (1.21.11), `minetunes-1.1.0+26.1.2.jar`, `+26.2`, `+26.3`. They share one project and one page;
    Modrinth groups them by the game versions you tick.
 7. Each of those four versions has its own file - `version-description-1.21.11.txt`,
    `version-description-26.1.2.txt`, `-26.2.txt`, `-26.3.txt`. Use its CHANGELOG section for the

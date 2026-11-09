@@ -28,7 +28,7 @@ import java.util.concurrent.CompletableFuture;
 public class LyricsFetcher {
 	public static final String HOST = "https://lrclib.net";
 	/** lrclib asks for a descriptive agent; it also says which program to blame in a log. */
-	public static final String AGENT = "MineTunes/1.0.0 (Fabric client mod; lyrics from lrclib.net)";
+	public static final String AGENT = "MineTunes/1.1.0 (Fabric client mod; lyrics from lrclib.net)";
 	private static final Duration TIMEOUT = Duration.ofSeconds(6);
 	/** A lyrics file is a few kilobytes; anything this large is not a lyrics file. */
 	private static final int MAX_BODY = 1 << 20;

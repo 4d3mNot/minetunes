@@ -1,4 +1,4 @@
-param([string] $Jar = (Join-Path $PSScriptRoot '..\build\libs\minetunes-1.0.0.jar'))
+param([string] $Jar = (Join-Path $PSScriptRoot '..\build\libs\minetunes-1.1.0.jar'))
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead($Jar)
 $names = $zip.Entries | ForEach-Object { $_.FullName }

@@ -10,7 +10,7 @@ tree, three targets, one jar each.
 ```
 
 `minecraft_version` defaults to `26.3`, so a bare `./gradlew build` gives you that one. The jar
-lands in `build/libs/minetunes-1.0.0+<target>.jar`, and its `fabric.mod.json` carries the target's
+lands in `build/libs/minetunes-1.1.0+<target>.jar`, and its `fabric.mod.json` carries the target's
 own `minecraft` range and version suffix, so the three can sit in the same folder without being
 loaded by the wrong game.
 

@@ -1,6 +1,6 @@
 MINETUNES - PAGE TEXT FOR MINECRAFT 1.21.11
 ===========================================
-File to upload: releases/minetunes-1.0.0.jar
+File to upload: releases/minetunes-1.1.0.jar
 Java 21, Fabric Loader 0.19.2+, Fabric API 0.141.6+1.21.11, Mod Menu optional (17.0.0).
 
 The CHANGELOG section goes in Modrinth's "Changelog" box or CurseForge's "File changelog" field for

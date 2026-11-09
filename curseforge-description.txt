@@ -112,7 +112,7 @@ These are ceilings in the SMTC contract, not bugs:
   and do not depend on it.
 
 
-CHANGELOG  (the "File changelog" field - the same text goes on every 1.0.0 file)
+CHANGELOG  (the "File changelog" field - the same text goes on every 1.1.0 file)
 ------------------------------------------------------------------------------
 First release.
 
@@ -139,7 +139,7 @@ HOW TO FILL IN THE CURSEFORGE FORM
 - License: MIT.
 - Relations: Fabric API = Required dependency. Mod Menu = Optional dependency.
 - Upload the file from `releases/` whose name matches that game version
-  (`minetunes-1.0.0.jar`, `minetunes-1.0.0+26.1.2.jar`, `+26.2`, `+26.3`), release type **Release**,
+  (`minetunes-1.1.0.jar`, `minetunes-1.1.0+26.1.2.jar`, `+26.2`, `+26.3`), release type **Release**,
   and paste the changelog above. Each is a separate file entry; do not tick several game versions on
   one file. The .jar already carries the 128px icon, so CurseForge's own icon upload is only for the
   project page.

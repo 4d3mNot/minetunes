@@ -1,6 +1,6 @@
 MINETUNES - PAGE TEXT FOR MINECRAFT 26.3
 ========================================
-File to upload: releases/minetunes-1.0.0+26.3.jar
+File to upload: releases/minetunes-1.1.0+26.3.jar
 Java 25, Fabric Loader 0.19.3+, Fabric API 0.165.0+26.3, Mod Menu optional (21.0.0).
 
 The CHANGELOG section goes in Modrinth's "Changelog" box or CurseForge's "File changelog" field for

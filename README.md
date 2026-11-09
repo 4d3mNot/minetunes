@@ -48,7 +48,7 @@ the words take the other side, and the clock comes in against the artwork.
 | OS | Windows 10 / 11 (SMTC is a Windows feature) |
 | Network | optional: only the lyrics lookup uses it, and `/music lyrics off` turns that off |
 
-One jar per Minecraft version, matched by file name: `minetunes-1.0.0.jar` is the 1.21.11 build,
+One jar per Minecraft version, matched by file name: `minetunes-1.1.0.jar` is the 1.21.11 build,
 and the 26.x builds end in `+26.1.2`, `+26.2` and `+26.3`. A 26.x jar will not load on 1.21.11 and
 vice versa — that is the point of the suffix.
 
