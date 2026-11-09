@@ -23,6 +23,8 @@ public final class MediaConfig {
 	public static final String THEME_AUTO = Palette.THEME_AUTO;
 	public static final String THEME_GREEN = Palette.THEME_GREEN;
 	public static final String THEME_WHITE = Palette.THEME_WHITE;
+	/** A lyric setting that was never touched: follow the card, or keep the deck's own alpha. */
+	public static final String AUTO = "auto";
 	public String hudX = "6";
 	public String hudY = "6";
 	public boolean showHud = true;
@@ -35,6 +37,28 @@ public final class MediaConfig {
 	public String theme = THEME_AUTO;
 	/** The transport buttons only answer while a screen owns the mouse. */
 	public boolean showControls = true;
+	/**
+	 * When no file exists for a track, ask lrclib.net for its lyrics.
+	 *
+	 * Off means the mod makes no lookup at all; a track with no file stays without words.
+	 * On is the default because a panel that only appears for songs someone remembered to
+	 * write a file for is a feature most players would never see; the request carries the
+	 * artist, title and length and nothing else.
+	 */
+	public boolean onlineLyrics = true;
+	/**
+	 * The lyric panel's own box, in GUI pixels. {@code auto} follows the card on that axis,
+	 * which is the shipped look; dragging the words in the move screen writes real numbers.
+	 */
+	public String lyricsX = AUTO;
+	public String lyricsY = AUTO;
+	public String lyricsWidth = AUTO;
+	public String lyricsHeight = AUTO;
+	/** Rows on screen when the height is automatic; a height set by hand decides for itself. */
+	public int lyricsLines = LyricsLayout.LINES;
+	/** Custom UI: the deck's panel band behind the words, and how solid that band is. */
+	public boolean lyricsPanel = true;
+	public String lyricsOpacity = AUTO;
 	/** Which deck from {@link #decks()} the card is drawn from; {@code built-in} is the shipped look. */
 	public String deck = DeckLibrary.BUILT_IN;
 	/**
@@ -54,6 +78,64 @@ public final class MediaConfig {
 
 	public int y() {
 		return read(hudY, 6, 0, Integer.MAX_VALUE);
+	}
+
+	public int lyricsX() {
+		return auto(lyricsX);
+	}
+
+	public int lyricsY() {
+		return auto(lyricsY);
+	}
+
+	public int lyricsWidth() {
+		return auto(lyricsWidth);
+	}
+
+	public int lyricsHeight() {
+		return auto(lyricsHeight);
+	}
+
+	/** Never outside the one-to-ceiling range the layout can paint. */
+	public int lyricsLines() {
+		return Math.max(1, Math.min(LyricsLayout.MAX_LINES, lyricsLines));
+	}
+
+	/**
+	 * The panel's alpha as a fraction, or 0 for "whatever the deck says".
+	 *
+	 * The file holds a percentage because that is what the settings screen shows; a stray word
+	 * or a number outside the range falls back to the deck rather than blanking the panel.
+	 */
+	public double lyricsOpacity() {
+		String raw = lyricsOpacity == null ? AUTO : lyricsOpacity.trim();
+		if (raw.endsWith("%")) {
+			raw = raw.substring(0, raw.length() - 1).trim();
+		}
+
+		if (AUTO.equalsIgnoreCase(raw)) {
+			return 0.0;
+		}
+
+		try {
+			return Math.max(LyricsLayout.MIN_OPACITY, Math.min(1.0, Integer.parseInt(raw) / 100.0));
+		} catch (NumberFormatException e) {
+			return 0.0;
+		}
+	}
+
+	/** -1 means automatic; anything else is a position or size the player asked for. */
+	private static int auto(String raw) {
+		String value = raw == null ? AUTO : raw.trim();
+		if (AUTO.equalsIgnoreCase(value) || value.isEmpty()) {
+			return LyricsLayout.AUTO;
+		}
+
+		try {
+			return Math.max(0, Integer.parseInt(value));
+		} catch (NumberFormatException e) {
+			return LyricsLayout.AUTO;
+		}
 	}
 
 	private static int read(String raw, int fallback, int low, int high) {
@@ -77,6 +159,17 @@ public final class MediaConfig {
 	 */
 	public static Path decks() {
 		return FabricLoader.getInstance().getConfigDir().resolve("musicdeck").resolve("decks");
+	}
+
+	/**
+	 * The folder the player's lyrics live in: {@code .minecraft/config/musicdeck/lyrics}.
+	 *
+	 * Files in here are the whole answer for the tracks they name. A track with no file is
+	 * offered to lrclib.net when {@link #onlineLyrics} is on, and the answer is saved here,
+	 * so the folder becomes the offline copy of everything the mod has ever found.
+	 */
+	public static Path lyrics() {
+		return FabricLoader.getInstance().getConfigDir().resolve("musicdeck").resolve("lyrics");
 	}
 
 	/** The deck the card draws from. Never null: an unreadable name is the built-in card. */
@@ -122,6 +215,7 @@ public final class MediaConfig {
 
 		// Seed the example decks before the stored name is resolved against the folder below.
 		DeckLibrary.seedMissing(decks());
+		LyricsLibrary.seedMissing(lyrics());
 
 		try (InputStream in = Files.newInputStream(from)) {
 			props.load(in);
@@ -139,6 +233,15 @@ public final class MediaConfig {
 		config.artStyle = pixel(props.getProperty("artStyle", SMOOTH)) ? PIXEL : SMOOTH;
 		config.theme = theme(props.getProperty("theme", THEME_AUTO));
 		config.showControls = Boolean.parseBoolean(props.getProperty("showControls", "true"));
+		config.onlineLyrics = Boolean.parseBoolean(props.getProperty("onlineLyrics", "true"));
+		config.lyricsX = props.getProperty("lyricsX", AUTO);
+		config.lyricsY = props.getProperty("lyricsY", AUTO);
+		config.lyricsWidth = props.getProperty("lyricsWidth", AUTO);
+		config.lyricsHeight = props.getProperty("lyricsHeight", AUTO);
+		config.lyricsLines = read(props.getProperty("lyricsLines", Integer.toString(LyricsLayout.LINES)),
+			LyricsLayout.LINES, 1, LyricsLayout.MAX_LINES);
+		config.lyricsPanel = Boolean.parseBoolean(props.getProperty("lyricsPanel", "true"));
+		config.lyricsOpacity = props.getProperty("lyricsOpacity", AUTO);
 		config.deck = props.getProperty("deck", config.deck).trim();
 		config.deckSkin = DeckLibrary.resolve(decks(), config.deck);
 		return config;
@@ -178,16 +281,28 @@ public final class MediaConfig {
 		props.setProperty("bridgeEnabled", Boolean.toString(bridgeEnabled));
 		props.setProperty("onlyWhenPlaying", Boolean.toString(onlyWhenPlaying));
 		props.setProperty("showControls", Boolean.toString(showControls));
+		props.setProperty("onlineLyrics", Boolean.toString(onlineLyrics));
 		props.setProperty("hudX", hudX);
 		props.setProperty("hudY", hudY);
 		props.setProperty("artStyle", artStyle());
 		props.setProperty("theme", theme());
 		props.setProperty("deck", deck);
+		props.setProperty("lyricsX", lyricsX);
+		props.setProperty("lyricsY", lyricsY);
+		props.setProperty("lyricsWidth", lyricsWidth);
+		props.setProperty("lyricsHeight", lyricsHeight);
+		props.setProperty("lyricsLines", Integer.toString(lyricsLines()));
+		props.setProperty("lyricsPanel", Boolean.toString(lyricsPanel));
+		props.setProperty("lyricsOpacity", lyricsOpacity == null ? AUTO : lyricsOpacity.trim());
 
 		try (OutputStream out = Files.newOutputStream(file())) {
 			props.store(out, "MineTunes - hudX/hudY are GUI pixels from the top left, "
 				+ "artStyle is smooth or pixel, theme is auto, green or white, "
-				+ "deck is a file name in config/musicdeck/decks");
+				+ "deck is a file name in config/musicdeck/decks, "
+				+ "onlineLyrics asks lrclib.net when a track has no file in config/musicdeck/lyrics, "
+				+ "lyricsX/Y/Width/Height are GUI pixels or auto (which follows the card), "
+				+ "lyricsLines is the rows an automatic height shows, "
+				+ "lyricsPanel and lyricsOpacity style the words' own panel");
 		} catch (IOException e) {
 			MusicDeck.LOGGER.warn("Could not write musicdeck.properties", e);
 		}

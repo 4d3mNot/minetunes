@@ -1,0 +1,23 @@
+# Line endings are not cosmetic here: `bash tools/mutate-hud.sh` dies on a carriage return, and
+# Windows users checking this out with core.autocrlf=true would get one. Pin what each file needs
+# so a clone is runnable without anyone configuring their git.
+* text=auto
+
+*.sh    text eol=lf
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+
+*.java  text eol=lf
+*.json  text eol=lf
+# The gates and the mutation plants read the bundled helper off disk with sed, and a trailing
+# carriage return moves every end-of-line anchor. PowerShell reads LF happily.
+*.ps1   text eol=lf
+*.md    text
+*.gradle text
+*.properties text
+.gitignore text
+.gitattributes text
+
+*.png binary
+*.jar binary
+*.ico binary

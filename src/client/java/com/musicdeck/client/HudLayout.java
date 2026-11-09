@@ -42,7 +42,8 @@ public final class HudLayout {
 	private static final int BTN_STEP = BTN_W + 2;
 	/** How much of the panel's light a paused card keeps; the built-in deck ships exactly this. */
 	private static final double IDLE_RATIO = 180.0 / 216.0;
-	private static final double PAUSED = 0.68;
+	/** How much light a paused card keeps. Shared with the lyrics panel so the two dim together. */
+	static final double PAUSED = 0.68;
 	private static final double INERT = 0.45;
 	/** How fast a line that does not fit travels, in GUI pixels per second. */
 	public static final double SCROLL_PX_PER_SEC = 22.0;
@@ -429,7 +430,8 @@ public final class HudLayout {
 	 * still goes see-through-minus when the music stops instead of snapping back to the
 	 * built-in's opacity. The ratio is the shipped card's own: 0xD8 live to 0xB4 idle.
 	 */
-	private static int dim(int panel) {
+	/** The deck's panel at the light a paused card keeps; the lyrics panel dims with it. */
+	static int dim(int panel) {
 		int alpha = (int) Math.round(((panel >>> 24) & 0xFF) * IDLE_RATIO);
 		return Palette.withAlpha(panel, alpha);
 	}
@@ -563,7 +565,7 @@ public final class HudLayout {
 	}
 
 	/** A 1px outline with gaps in it: the only honest way to say "this is not finished". */
-	private static void dashed(HudCanvas canvas, int x, int y, int w, int h, int colour) {
+	static void dashed(HudCanvas canvas, int x, int y, int w, int h, int colour) {
 		for (int column = 0; column < w; column += 3) {
 			if (column % 6 == 0) {
 				canvas.fill(x + column, y, x + column + 1, y + 1, colour);
@@ -613,7 +615,7 @@ public final class HudLayout {
 	}
 
 	/** A rectangle with its two corner pixels bitten off; the only rounding a 1px grid allows. */
-	private static void roundRect(HudCanvas canvas, int x, int y, int w, int h, int colour) {
+	static void roundRect(HudCanvas canvas, int x, int y, int w, int h, int colour) {
 		canvas.fill(x, y + 1, x + w, y + h - 1, colour);
 		canvas.fill(x + 1, y, x + w - 1, y + 1, colour);
 		canvas.fill(x + 1, y + h - 1, x + w - 1, y + h, colour);

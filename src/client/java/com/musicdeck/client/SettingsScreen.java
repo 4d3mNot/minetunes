@@ -107,16 +107,21 @@ public final class SettingsScreen extends Screen {
 		});
 
 		int footer = TOP + ROWS * STEP + 6;
-		int third = (TOTAL_W - 20) / 3;
+		// Four buttons rather than three: the lyrics page is a peer of the card's, and burying
+		// it inside another row would hide the one screen that explains the new handles.
+		int quarter = (TOTAL_W - 24) / 4;
 		this.addRenderableWidget(Button.builder(Component.translatable("musicdeck.settings.move"),
 			button -> this.minecraft.setScreen(new LayoutScreen(config, this)))
-			.bounds(left(), footer, third, BUTTON_H).build());
+			.bounds(left(), footer, quarter, BUTTON_H).build());
+		this.addRenderableWidget(Button.builder(Component.translatable("musicdeck.settings.lyrics"),
+			button -> this.minecraft.setScreen(new LyricsScreen(config, this)))
+			.bounds(left() + quarter + 8, footer, quarter, BUTTON_H).build());
 		this.addRenderableWidget(Button.builder(Component.translatable("musicdeck.settings.keys"),
 			button -> this.minecraft.setScreen(new KeyBindScreen(this)))
-			.bounds(left() + third + 10, footer, third, BUTTON_H).build());
+			.bounds(left() + 2 * (quarter + 8), footer, quarter, BUTTON_H).build());
 		this.addRenderableWidget(Button.builder(Component.translatable("musicdeck.settings.done"),
 			button -> this.minecraft.setScreen(back))
-			.bounds(left() + 2 * (third + 10), footer, TOTAL_W - 2 * (third + 10), BUTTON_H).build());
+			.bounds(left() + 3 * (quarter + 8), footer, TOTAL_W - 3 * (quarter + 8), BUTTON_H).build());
 	}
 
 	private void toggle(int row, boolean current, Consumer<Boolean> onChange) {

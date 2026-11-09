@@ -21,7 +21,13 @@ F=src/main/resources/fabric.mod.json
 I=src/main/resources/assets/musicdeck/icon.png
 SK=src/client/java/com/musicdeck/client/DeckSkin.java
 DL=src/client/java/com/musicdeck/client/DeckLibrary.java
-SRC="tools/CheckHud.java $L $P src/client/java/com/musicdeck/client/HudCanvas.java src/client/java/com/musicdeck/client/NowPlaying.java src/client/java/com/musicdeck/client/JsonLine.java $SK $DL"
+LY=src/client/java/com/musicdeck/client/Lyrics.java
+LB=src/client/java/com/musicdeck/client/LyricsLibrary.java
+LH=src/client/java/com/musicdeck/client/LyricsCache.java
+LP=src/client/java/com/musicdeck/client/LyricsLayout.java
+CM=src/client/java/com/musicdeck/client/MusicDeckCommand.java
+LF=src/client/java/com/musicdeck/client/LyricsFetcher.java
+SRC="tools/CheckHud.java $L $P src/client/java/com/musicdeck/client/HudCanvas.java src/client/java/com/musicdeck/client/NowPlaying.java src/client/java/com/musicdeck/client/JsonLine.java $SK $DL $LY $LB $LH $LP $LF"
 
 # CheckHud reads the screens and the language file off disk at run time, so a plant in
 # either is live without a recompile - which also means restore() has to put them back.
@@ -48,6 +54,12 @@ restore() {
 	cp build-mut/icon.png "$I"
 	cp build-mut/DeckSkin.java "$SK"
 	cp build-mut/DeckLibrary.java "$DL"
+	cp build-mut/Lyrics.java "$LY"
+	cp build-mut/LyricsLibrary.java "$LB"
+	cp build-mut/LyricsCache.java "$LH"
+	cp build-mut/LyricsLayout.java "$LP"
+	cp build-mut/MusicDeckCommand.java "$CM"
+	cp build-mut/LyricsFetcher.java "$LF"
 }
 mkdir -p build-mut
 cp "$L" build-mut/HudLayout.java
@@ -68,6 +80,12 @@ cp "$F" build-mut/fabric.mod.json
 cp "$I" build-mut/icon.png
 cp "$SK" build-mut/DeckSkin.java
 cp "$DL" build-mut/DeckLibrary.java
+cp "$LY" build-mut/Lyrics.java
+cp "$LB" build-mut/LyricsLibrary.java
+cp "$LH" build-mut/LyricsCache.java
+cp "$LP" build-mut/LyricsLayout.java
+cp "$CM" build-mut/MusicDeckCommand.java
+cp "$LF" build-mut/LyricsFetcher.java
 
 survivors=0
 plant() { # file, sed-expr, needle-expected-in-output
@@ -111,12 +129,24 @@ plant() { # file, sed-expr, needle-expected-in-output
 # The icon is bytes, not text: sed cannot plant a defect in it, so the plant is a whole
 # different file dropped onto the same path. Everything else about the run is the same.
 swap() { # file, stand-in, what the gate must name
+	if [ ! -f "$2" ]; then
+		echo "NOT-APPLIED: $3   <-- the stand-in $2 was never built"
+		survivors=$((survivors + 1))
+		return
+	fi
 	if cmp -s "$2" "$1"; then
 		echo "NOT-APPLIED: $3   <-- the stand-in is already the file itself"
 		survivors=$((survivors + 1))
 		return
 	fi
 	cp "$2" "$1"
+	# A copy that failed, or one the file system refused, would otherwise run the gates
+	# against a clean tree and report a pass. The plant is only planted if the bytes moved.
+	if ! cmp -s "$2" "$1"; then
+		echo "NOT-APPLIED: $3   <-- the stand-in did not reach $1"
+		survivors=$((survivors + 1))
+		return
+	fi
 	if ! javac -encoding UTF-8 -d build-mut $SRC 2>build-mut/javac.txt; then
 		echo "SKIP (would not compile): $3"
 		restore
@@ -387,8 +417,142 @@ plant "$L" 's@int column = textEnd - textX;@int column = x + width - pad - textX
 plant "$L" 's@parts.textX() + parts.column() - canvas.textWidth(frame.time())@x + width - pad - canvas.textWidth(frame.time())@' 'the clock of a turned card hides underneath the sleeve'
 plant "$L" 's@parts, mirror, skin, title@parts, false, skin, title@' 'the measured card forgets which side it turned to'
 plant "$L" 's@int rowX = x + (width - rowW) / 2;@int rowX = mirror ? x + width - rowW - pad : x + (width - rowW) / 2;@' 'the control row slides to one edge when the card turns'
-plant "$N" 's@graphics.guiWidth(), graphics.guiHeight()@graphics.guiHeight(), graphics.guiWidth()@' 'the card is measured against the screen height, so it never learns which side it is on'
+plant "$N" 's@int guiWidth = graphics.guiWidth(), guiHeight = graphics.guiHeight();@int guiWidth = graphics.guiHeight(), guiHeight = graphics.guiWidth();@' 'the card is measured against the screen height, so it never learns which side it is on'
+plant "$N" 's|lyricsOptions(), guiWidth, guiHeight);|lyricsOptions(), graphics.guiWidth(), graphics.guiHeight());|' 'the words are measured against a second read of the screen, so they can disagree with the card'
 plant "$N" 's@minecraft.getWindow().getGuiScaledWidth(), minecraft.getWindow().getGuiScaledHeight()@minecraft.getWindow().getGuiScaledHeight(), minecraft.getWindow().getGuiScaledHeight()@' 'the click path measures the card against another screen than the painter does'
+
+echo "=== plants: the lyric file and its words ==="
+# The parser is the one place a player's own file is read, and every mistake here is silent:
+# a wrong fraction, a dropped offset or an unsorted list all draw plausible words at the
+# wrong moment. Each plant names one of those silences.
+plant "$LY" 's|timed.add(new Line(seconds, words));|timed.add(new Line(Math.max(0.0, seconds - offset), words));|; s|shifted.add(new Line(Math.max(0.0, line.at() - offset), line.text()));|shifted.add(new Line(line.at(), line.text()));|' 'an offset written at the bottom no longer covers the lines above it'
+plant "$LY" 's|return fraction.isEmpty() ? value : value + Double.parseDouble("0." + fraction);|return fraction.isEmpty() ? value : value + Integer.parseInt(fraction) / 100.0;|' 'the fraction is read as hundredths whatever its length, so .5 is five hundredths'
+plant "$LY" 's|text = text.substring(1);|text = text;|' 'a byte-order mark is left on the first line, so that line is thrown away'
+plant "$LY" 's|shifted.sort(Comparator.comparingDouble(Line::at));||' 'the lines stay in file order, so a file written out of order rewinds the song'
+plant "$LY" 's|stamps.add(seconds);|stamps.clear(); stamps.add(seconds);|' 'a chorus written with two stamps is only sung the second time'
+plant "$LY" 's|timed.add(new Line(seconds, words));|if (!words.isEmpty()) timed.add(new Line(seconds, words));|' 'a timed gap is dropped, so the previous line stands through the instrumental'
+plant "$LY" 's|lines.get(index).at() <= seconds|lines.get(index).at() < seconds|' 'a line does not start on its own stamp, so every line lands a frame late'
+plant "$LY" 's|replace("\\u2026", "...")|replace("\\u2026", ".")|' 'the ellipsis a lyric site writes is halved in the middle of a line'
+
+echo "=== plants: finding the file for the song ==="
+# A .lrc is somebody's own file in a folder of their own files, so the matcher has to be
+# forgiving about spelling and strict about which song it is - and must never crash on a
+# folder that is not there.
+plant "$LB" 's|if (name.equals(key(stem(file)))) {|if (name.equals(key(baseName(file)))) {|' 'a file named after the track is compared with its .lrc suffix attached, so nothing ever matches'
+plant "$LB" 's|if (Character.isLetterOrDigit(ch)) {|if (!Character.isWhitespace(ch)) {|' 'a file name is compared with its punctuation kept, so a hyphen defeats the match'
+plant "$LB" 's|kept.append(Character.toLowerCase(ch));|kept.append(ch);|' 'a file name is matched case-sensitively, so a title saved in lower case is never read'
+plant "$LB" 's|for (String name : wanted) {|for (String name : wanted.subList(wanted.size() - 1, wanted.size())) {|' 'only the loosest name is tried, so a title-only file outranks the artist and title'
+plant "$LB" 's|if (!plain.equals(of)) {|if (false) {|' 'a bracketed note in a title stops the file named without it from matching'
+plant "$LB" 's|if (name.equals(key(stem(file)))) {|if (true) {|' 'the first file in the folder is read for every track'
+plant "$LB" 's|return new String(bytes, LEGACY);|return new String(bytes, StandardCharsets.UTF_8);|' 'an old Windows-encoded file is read as UTF-8, so its accents come out as junk'
+plant "$LB" 's|if (Files.exists(target)) {|if (false) {|' 'seeding overwrites a lyric file the player edited'
+
+echo "=== plants: the cache over the file ==="
+# The card asks sixty times a second. A cache that never re-reads freezes the words of the
+# last song; one that re-reads every frame is a folder listing in the frame budget.
+plant "$LH" 's|private static final long RECHECK_MILLIS = 1000L;|private static final long RECHECK_MILLIS = 3600000L;|' 'an edited lyric file is not picked up until the song changes'
+plant "$LH" 's|if (!wanted.equals(key)) {|if (false) {|' 'the cache never notices the track changed, so the next song keeps the last one'"'"'s words'
+plant "$LH" 's|if (found.equals(file) \&\& modified == stamp) {|if (found.equals(file)) {|' 'a file edited while its own song plays is never re-read'
+
+echo "=== plants: the lyric panel ==="
+# Three rows, one of them lit, inside a box that stays on screen. Every plant here is a
+# legal drawing of the wrong thing, which is why the geometry has to be checked by number.
+plant "$LP" 's|widest = Math.max(widest, canvas.textWidth(line.text()));|widest = canvas.textWidth(line.text());|' 'the width is taken from the last line in the file instead of the widest'
+plant "$LP" 's|width = Math.max(MIN_WIDTH, Math.min(width, Math.min(MAX_WIDTH, guiWidth)));|width = Math.max(MIN_WIDTH, width);|' 'the panel can grow past the window and off the screen'
+plant "$LP" 's|int placed = card.mirror() ? card.x() + card.width() - width : card.x();|int placed = card.x();|' 'a right-parked card'"'"'s words hang off its left edge instead of its right'
+plant "$LP" 's|int first = current < 0 ? 0 : Math.max(0, Math.min(current - rows / 2, lyrics.lines().size() - rows));|int first = 0;|' 'the window never scrolls, so the panel is stuck on its first rows'
+plant "$LP" 's|Math.min(current - rows / 2, lyrics.lines().size() - rows)|current - rows / 2|' 'at the end the window runs past the last line, leaving blank rows'
+plant "$LP" 's|boolean singing = index == frame.current();|boolean singing = true;|' 'every line is painted as the one being sung'
+plant "$LP" 's|int otherInk = Palette.withAlpha(currentInk, live ? 130 : 90);|int otherInk = currentInk;|' 'the neighbours are as bright as the line being sung'
+plant "$LP" 's|String text = fit(canvas, line.text(), room);|String text = line.text();|' 'a line wider than the panel runs over its border instead of being cut'
+plant "$LP" 's|int textX = frame.x() + (frame.width() - canvas.textWidth(text)) / 2;|int textX = frame.x() + PAD;|' 'the lines are left-aligned inside the panel instead of centred'
+plant "$LP" 's|if (text.isEmpty()) {|if (false) {|' 'a timed gap is painted as an empty line instead of skipped'
+plant "$LP" 's|band = HudLayout.dim(band);|band = band;|' 'a paused lyric panel stays fully lit'
+plant "$LP" 's|int above = card.y() - GAP - height;|int above = card.y() + card.height() + GAP;|' 'a card at the bottom of the screen has its words drawn off the bottom edge'
+plant "$LP" 's|int y = roomBelow >= roomAbove ? below : above;|int y = below;|' 'a squeezed panel always covers the card from below, even when above is the emptier half'
+
+echo "=== plants: the words as their own box ==="
+# A panel that can go anywhere is four numbers that must each be obeyed, and a grip that
+# must be exactly where it is painted. Every plant here draws a legal panel in the wrong
+# place, which is why the numbers are checked instead of the picture.
+plant "$LP" 's|int x = options.x() < 0 ? placed : options.x();|int x = placed;|' 'words dragged sideways snap back to the card'"'"'s edge'
+plant "$LP" 's|int y = options.y() < 0 ? place(card, height, guiHeight) : options.y();|int y = place(card, height, guiHeight);|' 'words dragged up snap back under the card'
+plant "$LP" 's|width = Math.max(MIN_WIDTH, Math.min(options.width(), guiWidth));|width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, guiWidth));|' 'a width the player dragged is ignored for the automatic one'
+plant "$LP" 's|int height = options.height() <= 0 ? height(rows) : options.height();|int height = height(rows);|' 'a box dragged taller is snapped back to three rows'
+plant "$LP" 's|return y + (height - block) / 2 + row \* (LINE + LINE_GAP);|return y + PAD + row \* (LINE + LINE_GAP);|' 'a tall box stacks its rows at the top instead of centring them'
+plant "$LP" 's|int rows = options.lines() <= 0 ? LINES : Math.min(MAX_LINES, Math.max(1, options.lines()));|int rows = LINES;|' 'the line count is ignored, so the settings row does nothing'
+plant "$LP" 's|x = Math.max(0, Math.min(x, guiWidth - width));|x = Math.max(0, x);|' 'a box dragged past the right edge is drawn half off the screen'
+plant "$LP" 's|y = Math.max(0, Math.min(y, guiHeight - height));|y = Math.max(0, y);|' 'a box dragged past the bottom edge is drawn off the bottom'
+plant "$LP" 's|int size = Math.min(GRIP, Math.min(width, height));|int size = GRIP;|' 'a grip bigger than a one-line box hangs off it'
+plant "$LP" 's|return new HudLayout.Rect(x + width - size, y + height - size, size, size);|return new HudLayout.Rect(x + width - GRIP, y + height - GRIP, size, size);|' 'the grip is not in the corner it is painted in'
+plant "$LP" 's|return grip().holds(mx, my);|return true;|' 'every click on the box resizes it, so the words can never be dragged'
+
+echo "=== plants: the lyric panel's custom UI ==="
+plant "$LP" 's|if (style.panel()) {|if (true) {|' 'the panel stays drawn after the player switches it off'
+plant "$LP" 's|if (style.opacity() > 0.0) {|if (false) {|' 'an opacity set by hand never reaches the band'
+plant "$LP" 's|Math.max(MIN_OPACITY, style.opacity())|style.opacity()|' 'a faint opacity can make the words disappear'
+plant "$LP" 's|if (style.editing()) {|if (false) {|' 'the move screen paints no grip for the words'
+plant "$LP" 's|if (style.editing()) {|if (true) {|' 'every ordinary panel shows the editor'"'"'s grip and outline'
+plant "$LP" 's%singing || !style.panel()%singing%' 'a dim neighbour on a panel with no band is drawn with no shadow'
+plant "$LP" 's%singing || !style.panel()%true%' 'every row on a panel takes the sung line'"'"'s shadow'
+plant "$LP" 's|int band = skin.panel();|int band = DeckSkin.BUILT_IN.panel();|' 'the words ignore the deck the card is wearing'
+
+echo "=== plants: the placement editor ==="
+plant "$S" 's|panel.gripHolds(mx, my)|false|' 'the corner of the words is never grabbed to resize'
+plant "$S" 's|config.lyricsX = Integer.toString(panel.x());|config.lyricsX = Integer.toString(0);|' 'a resize does not pin the box it grew from, so the words slide away'
+plant "$S" 's|config.lyricsHeight = homeLyricsHeight;||' 'ESC keeps the height a mis-drag left behind'
+
+echo "=== plants: the lyric knobs through the card and the command ==="
+plant "$N" 's|config.lyricsLines()|LyricsLayout.LINES|' 'the card ignores the line count the settings page writes'
+plant "$N" 's|config.lyricsOpacity()|0.0|' 'the card ignores the opacity the settings page writes'
+plant "$N" 's|!words.present() && editing()|!words.present()|' 'the demo words appear outside the move screen'
+plant "$N" 's|this.words = panel;|this.words = null;|' 'the editor is handed no frame to grab'
+plant "$CM" 's|literal("place")|literal("where")|' 'the command cannot put the words at a point'
+plant "$CM" 's|lyricSize(client, context)|lyricPlace(client, context)|' 'the command cannot set the words'"'"' size'
+plant "$CM" 's|literal("reset")|literal("clear")|' 'the command cannot put the lyric knobs back to auto'
+plant "$V" 's|props.setProperty("lyricsWidth", lyricsWidth);||' 'a width the player set is lost on the next restart'
+plant "$V" 's|AUTO.equalsIgnoreCase(value)|value.isEmpty()|' 'the word auto in the file lands the words at zero'
+plant "$V" 's|raw.endsWith("%")|false|' 'an opacity written with its percent sign is read as auto'
+
+echo "=== plants: the wiring from the card to the folder ==="
+plant "$N" 's|LyricsLayout.draw(canvas, panel, accent, playing.playing(),|// the panel is measured and never painted|' 'the card measures the words and never paints them'
+plant "$N" 's|MediaConfig.lyrics(), playing.artist(), playing.title(),|MediaConfig.lyrics(), playing.artist(), playing.album(),|' 'the card looks the words up under the album name instead of the song'
+plant "$CM" 's|ClientCommandManager.literal("lyrics")|ClientCommandManager.literal("lyric")|' 'the lyrics folder cannot be reached from the command'
+plant "$V" 's|LyricsLibrary.seedMissing(lyrics());||' 'the lyrics folder is never created, so nothing shows the player the format'
+
+echo "=== plants: the online lookup, the mod's only socket ==="
+plant "$LF" 's|urls.add(base + "&duration=" + seconds);|urls.add(0, base);|' 'the first address carries no length, so a live take and the studio one are the same song'
+plant "$LF" 's|urls.add(base);|urls.add(base + "&duration=" + seconds);|' 'the retry pins the length again, so a remaster a second off is never found'
+plant "$LF" 's|if (seconds > 0L) {|if (true) {|' 'an unknown length is sent as zero seconds instead of left out'
+plant "$LF" 's|point == '"'"'~'"'"')|point == '"'"'~'"'"' \|\| point == '"'"'%'"'"')|' 'a percent sign is left raw, so the name is not escaped the way the query needs'
+plant "$LF" 's|getBytes(StandardCharsets.UTF_8)|getBytes(StandardCharsets.ISO_8859_1)|' 'an accented name is sent as one byte, so the service reads a question mark'
+plant "$LF" 's|return line.string("syncedLyrics", "");|return line.string("syncedLyrics", "").replace("\\n", " ");|' 'the answer is flattened onto one line, so every line lands at once'
+plant "$LF" 's|if (line.bool("instrumental", false)) {|if (false) {|' 'an instrumental answer is drawn as the words of the track'
+plant "$LF" 's|, "_").trim();|, "?").trim();|' 'a fetched file is named with a character Windows forbids, so it cannot be kept'
+plant "$LF" 's|String name = by.isEmpty() ? of : by + " - " + of;|String name = of;|' 'the artist is dropped from the file name, so the matcher never finds it on the next play'
+plant "$LF" 's|name = trimEnd(name);|name = name;|' 'a name ending in a dot is kept, and Windows quietly drops the dot'
+plant "$LF" 's|return (name.isEmpty() ? "lyrics" : name)|return (name.isEmpty() ? "" : name)|' 'a track with no name makes a bare ".lrc" instead of a usable fallback'
+plant "$LF" 's|if (name.length() > MAX_NAME) {|if (false) {|' 'a very long title makes a path Windows refuses'
+plant "$LF" 's|write(directory, fileName(artist, title), text);|// the answer is never written down|' 'a hit is shown once and thrown away, so the next play asks the network again'
+plant "$LF" 's|if (!lyrics.present()) {|if (false) {|' 'words with no timestamps are saved as a file the panel cannot use'
+plant "$LF" 's|if (!Files.exists(target)) {|if (true) {|' 'a fetched file overwrites the timing the player wrote'
+plant "$LF" 's|return get(urls, 0)|return CompletableFuture.completedFuture(get(urls, 0).join())|' 'the lookup is waited on where it is started, so the frame stalls until the answer arrives'
+plant "$LF" 's|connectTimeout(TIMEOUT)|connectTimeout(Duration.ofSeconds(30))|' 'a connection that hangs holds its thread for half a minute'
+plant "$LF" 's|.header("User-Agent", AGENT)|.header("X-Client", AGENT)|' 'the service is not told which program is asking'
+plant "$LF" 's|public static final String HOST = "https://lrclib.net";|public static final String HOST = "http://lyrics.example.com";|' 'the words are asked for from somewhere other than the one host this mod knows'
+plant "$LH" 's|if (!online) {|if (!online \&\& false) {|' 'online off is still a request, so a switch that says off is not off'
+plant "$LH" 's|return online(directory, artist, title, online, duration);|return online(directory, artist, title, true, duration);|' 'a miss asks the network even with the switch off'
+plant "$LH" 's|pending = fetcher.request(directory, artist, title, duration);|pending = fetcher.request(directory, artist, title, -1.0);|' 'the lookup goes out without the length the card knows'
+plant "$LH" 's|asked = track;|asked = "";|' 'the same track is asked for again on every frame, and a failure is retried forever'
+plant "$LH" 's|if (!online) {|if (!online) { fetched = Lyrics.EMPTY;|' 'turning the switch off drops words that already arrived'
+plant "$LH" 's|if (!track.equals(asked)) {|if (false) {|' 'a new track keeps the last one'"'"'s words'
+plant "$LH" 's|} catch (CompletionException e) {|} catch (CompletionException e) { if (e != null) return Lyrics.parse("[00:01.00]x");|' 'a failed lookup paints an invented line instead of nothing'
+plant "$LY" 's|"<|"$|' 'the word stamps are left in the line, so the timing is drawn across the screen'
+plant "$LY" 's|.trim();|.replaceAll("<[^>]*>", " ").trim();|' 'anything in angle brackets is eaten, so a line about "<3" loses its words'
+plant "$N" 's|config.onlineLyrics, playing.duration());|true, playing.duration());|' 'the card ignores the online switch and always asks'
+plant "$N" 's|LyricsLayout.draw(canvas, panel, accent, playing.playing(),|LyricsLayout.draw(canvas, panel, accent, playing.playing() \|\| LyricsFetcher.HOST.isEmpty(),|' 'the draw path reaches for the fetcher itself instead of asking the cache'
+plant "$CM" 's|online(client, context, false)|online(client, context, true)|' 'the command has no way to turn the lookup off'
+plant "$V" 's|props.setProperty("onlineLyrics"|props.setProperty("onlineLyric"|' 'the online switch is written under a name that is never read back'
 
 echo "=== control run again (files must be back) ==="
 javac -encoding UTF-8 -d build-mut $SRC && java -cp build-mut CheckHud | tail -1
@@ -403,5 +567,11 @@ diff -q "$L" build-mut/HudLayout.java && diff -q "$P" build-mut/Palette.java \
 	&& diff -q "$I" build-mut/icon.png \
 	&& diff -q "$SK" build-mut/DeckSkin.java \
 	&& diff -q "$DL" build-mut/DeckLibrary.java \
+	&& diff -q "$LY" build-mut/Lyrics.java \
+	&& diff -q "$LB" build-mut/LyricsLibrary.java \
+	&& diff -q "$LH" build-mut/LyricsCache.java \
+	&& diff -q "$LP" build-mut/LyricsLayout.java \
+	&& diff -q "$CM" build-mut/MusicDeckCommand.java \
+	&& diff -q "$LF" build-mut/LyricsFetcher.java \
 	&& echo "sources restored"
 echo "surviving plants: $survivors"

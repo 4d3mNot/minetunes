@@ -3,6 +3,11 @@ import com.musicdeck.client.DeckSkin;
 import com.musicdeck.client.HudCanvas;
 import com.musicdeck.client.HudLayout;
 import com.musicdeck.client.JsonLine;
+import com.musicdeck.client.Lyrics;
+import com.musicdeck.client.LyricsCache;
+import com.musicdeck.client.LyricsFetcher;
+import com.musicdeck.client.LyricsLayout;
+import com.musicdeck.client.LyricsLibrary;
 import com.musicdeck.client.NowPlaying;
 import com.musicdeck.client.Palette;
 
@@ -82,6 +87,37 @@ public final class CheckHud {
 			}
 
 			return null;
+		}
+	}
+
+	/** Records only whether each text run asked for a shadow, which a panel-less lyric depends on. */
+	static final class Ink implements HudCanvas {
+		final List<Boolean> shadows = new ArrayList<>();
+
+		@Override
+		public int textWidth(String text) {
+			return text.isEmpty() ? 0 : text.length() * 6;
+		}
+
+		@Override
+		public void text(String text, int x, int y, int colour, boolean shadow) {
+			shadows.add(shadow);
+		}
+
+		@Override
+		public void clip(int x1, int y1, int x2, int y2) {
+		}
+
+		@Override
+		public void unclip() {
+		}
+
+		@Override
+		public void fill(int x1, int y1, int x2, int y2, int colour) {
+		}
+
+		@Override
+		public void art(int x, int y, int size) {
 		}
 	}
 
@@ -365,6 +401,28 @@ public final class CheckHud {
 		return argb & 0xFF;
 	}
 
+	/** The panel band of a lyrics frame: one pixel in, two down, as the rounded rect is drawn. */
+	static Op lyricBand(Recorder recorder, LyricsLayout.Frame frame) {
+		return recorder.kind("fill").stream()
+			.filter(op -> op.x1() == frame.x() + 1 && op.y1() == frame.y() + 2)
+			.findFirst()
+			.orElseThrow(() -> new IllegalStateException("no lyric panel band was drawn"));
+	}
+
+	static void deleteTree(java.nio.file.Path root) {
+		try (var walk = java.nio.file.Files.walk(root)) {
+			walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+				try {
+					java.nio.file.Files.deleteIfExists(path);
+				} catch (java.io.IOException ignored) {
+					// A temp fixture nobody can delete is the OS's problem, not the gate's.
+				}
+			});
+		} catch (java.io.IOException ignored) {
+			// Same.
+		}
+	}
+
 	static void expect(boolean condition, String what) {
 		if (condition) {
 			passed++;
@@ -375,7 +433,7 @@ public final class CheckHud {
 		}
 	}
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws Exception {
 		int accent = 0xFF1DB954;
 		NowPlaying live = playing("Playing", "Trust", "Brent Faiyaz", "Björk", 17.0, 158.4);
 		NowPlaying huge = playing("Playing",
@@ -1489,7 +1547,9 @@ public final class CheckHud {
 		// lets a deck set a tile the card then ignores.
 		String measured = codeOnly(CLIENT_DIR + "HudLayout.java");
 		int atFrame = measured.indexOf("public static Frame frame(");
-		int afterDraw = measured.indexOf("private static int dim(");
+		// dim() stopped being private when the lyrics panel started dimming with the card,
+		// so the anchor is the signature and not the access modifier.
+		int afterDraw = measured.indexOf("static int dim(int panel)");
 		expect(atFrame >= 0 && afterDraw > atFrame, "the gate can find frame() and draw() to read them");
 		expect(!java.util.regex.Pattern.compile("\\b(TILE|PAD|GAP|MIN_CONTENT|MAX_CONTENT)\\b")
 			.matcher(measured.substring(atFrame, afterDraw)).find(),
@@ -1777,12 +1837,586 @@ public final class CheckHud {
 			"the clock is placed from the column the frame measured, never from the panel's own pad");
 		expect(!layoutCode.contains("frame.mirror()"),
 			"the painter takes no side of its own: every box it draws is already mirrored in the frame");
-		expect(count(hud, "graphics.guiWidth(), graphics.guiHeight()") == 1
+		// Since the words are placed against the same screen as the card, the window is read
+		// once a frame and both are sized from that one read. The exact declaration is pinned
+		// as well as the counts, because a swapped pair reads each name once and still asks
+		// the wrong side of the screen where the card is.
+		expect(count(hud, "graphics.guiWidth()") == 1 && count(hud, "graphics.guiHeight()") == 1
+			&& hud.contains("int guiWidth = graphics.guiWidth(), guiHeight = graphics.guiHeight();")
 			&& count(hud, "getGuiScaledWidth(), minecraft.getWindow().getGuiScaledHeight()") == 1,
-			"the card is measured against the live screen width, which is what tells it which side it is on");
+			"the card and the words under it are measured against one live read of the screen, which is what "
+				+ "tells the card which side it is on");
+
+		// --- lyrics: the file, the match and the panel ---
+		// Spotify draws its own lyrics inside its window and hands no part of them to another
+		// process, so this feature's only source is a file the player supplies. Everything
+		// below is text and geometry, which is what makes it checkable with no song playing.
+		Lyrics lySample = Lyrics.parse("""
+			[ti:Trust]
+			[ar:Brent Faiyaz]
+			[00:10.50]First line
+			[00:14.00]Second line
+			[00:18.25]Third line
+			""");
+		expect(lySample.lines().size() == 3, "three timed lines, got " + lySample.lines().size());
+		expect(Math.abs(lySample.at(0).at() - 10.5) < 1e-9,
+			"hundredths are a decimal of a second, got " + lySample.at(0).at());
+		expect(lySample.at(0).text().equals("First line"), "the stamp is not part of the words");
+		expect(Math.abs(Lyrics.parse("[00:01.5]x").at(0).at() - 1.5) < 1e-9,
+			".5 is half a second, not five hundredths");
+		expect(Math.abs(Lyrics.parse("[00:01.500]x").at(0).at() - 1.5) < 1e-9,
+			"thousandths are read as a decimal too");
+		expect(Lyrics.parse("[00:01.00]a\r\n[00:02.00]b").lines().size() == 2,
+			"a file saved with Windows line endings parses like one saved with Unix ones");
+		expect(Lyrics.parse("\uFEFF[00:01.00]a").lines().size() == 1,
+			"a byte-order mark at the top does not eat the first line");
+		expect(Math.abs(Lyrics.parse("[offset:500]\n[00:10.00]a").at(0).at() - 9.5) < 1e-9,
+			"a positive offset brings the words forward");
+		expect(Math.abs(Lyrics.parse("[00:10.00]a\n[offset:-500]").at(0).at() - 10.5) < 1e-9,
+			"a negative offset pushes them back, and one written at the bottom still covers the top");
+		expect(Math.abs(Lyrics.parse("[offset:abc][00:10.00]a").at(0).at() - 10.0) < 1e-9,
+			"an unreadable offset shifts nothing");
+		expect(Lyrics.parse("[offset:20000][00:01.00]a").at(0).at() == 0.0,
+			"an offset longer than the song starts it at zero rather than before it");
+		Lyrics lyChorus = Lyrics.parse("[00:01.00][00:05.00]Chorus");
+		expect(lyChorus.lines().size() == 2 && lyChorus.at(1).text().equals("Chorus"),
+			"a line with two stamps is the same words at both times");
+		// Two stamps side by side, which is what a held note looks like: removing them
+		// without leaving a space glues the words together.
+		Lyrics lyWordTimed = Lyrics.parse("[00:18.00]<00:18.89>We're <00:19.25><00:19.80>no strangers");
+		expect(lyWordTimed.at(0).text().equals("We're no strangers"),
+			"an enhanced file's word stamps are spacing, not words, got " + lyWordTimed.at(0).text());
+		expect(Lyrics.parse("[00:01.00]2 < 3 and <not a stamp>").at(0).text().equals("2 < 3 and <not a stamp>"),
+			"and a line that really does contain an angle bracket keeps it");
+		Lyrics lyGap = Lyrics.parse("[00:01.00]a\n[00:03.00]\n[00:05.00]b");
+		expect(lyGap.lines().size() == 3 && lyGap.at(1).text().isEmpty(),
+			"a timed line with no words is kept as a gap rather than dropped");
+		expect(Lyrics.parse("[ti:x]\n[ar:y]\nplain words\n").lines().isEmpty(),
+			"a file of tags and prose has no timed lyric in it");
+		expect(Lyrics.parse("[00:09.00]late\n[00:02.00]early").at(0).text().equals("early"),
+			"the lines are sorted, so a file written out of order cannot rewind the song");
+		Lyrics lyQuotes = Lyrics.parse("[00:01.00]Don\u2019t \u201Crun\u201D \u2014 wait\u2026");
+		expect(lyQuotes.at(0).text().equals("Don't \"run\" - wait..."),
+			"the curly quotes a lyric site writes are folded to glyphs the game's font has, got "
+				+ lyQuotes.at(0).text());
+		expect(lySample.indexAt(5.0) == -1, "before the first line nothing is being sung");
+		expect(lySample.indexAt(10.5) == 0 && lySample.indexAt(13.999) == 0,
+			"a line owns the time from its stamp to the next one");
+		expect(lySample.indexAt(14.0) == 1, "the next line starts exactly on its stamp");
+		expect(lySample.indexAt(999.0) == 2, "after the last stamp the last line stays up");
+		expect(Lyrics.EMPTY.indexAt(1.0) == -1 && Lyrics.EMPTY.at(0) == null && !Lyrics.EMPTY.present(),
+			"no lyrics is no line and no panel, not a crash");
+
+		expect(LyricsLibrary.key("Brent Faiyaz - Trust").equals("brent faiyaz trust"),
+			"a file name is compared with its case and punctuation thrown away");
+		expect(LyricsLibrary.key(" brent_faiyaz__TRUST ").equals(LyricsLibrary.key("Brent Faiyaz - Trust")),
+			"underscores and doubled spaces do not change which song a file is for");
+		List<String> lyNames = LyricsLibrary.candidates("Brent Faiyaz", "Trust");
+		expect(lyNames.get(0).equals("brent faiyaz trust") && lyNames.get(1).equals("trust"),
+			"the artist and title together are tried before the title alone, so another artist's "
+				+ "\"Trust\" cannot win, got " + lyNames);
+		expect(LyricsLibrary.candidates("Taylor Swift", "Welcome To New York (From The Vault)")
+			.contains("taylor swift welcome to new york"),
+			"a title with a bracketed aside also matches a file named without the aside");
+
+		java.nio.file.Path lyFolder = java.nio.file.Files.createTempDirectory("minetunes-lyrics");
+		java.nio.file.Files.writeString(lyFolder.resolve("Brent Faiyaz - Trust.lrc"), "[00:01.00]a");
+		expect(LyricsLibrary.find(lyFolder, "Brent Faiyaz", "Trust") != null,
+			"a file named after the track is found");
+		java.nio.file.Path lyLoose = java.nio.file.Files.createTempDirectory("minetunes-loose");
+		java.nio.file.Files.writeString(lyLoose.resolve("brent_faiyaz - TRUST.lrc"), "[00:01.00]a");
+		expect(LyricsLibrary.find(lyLoose, "Brent Faiyaz", "Trust") != null,
+			"and so is one spelled with different punctuation and case");
+		java.nio.file.Path lyTitle = java.nio.file.Files.createTempDirectory("minetunes-title");
+		java.nio.file.Files.writeString(lyTitle.resolve("Trust.lrc"), "[00:01.00]a");
+		expect(LyricsLibrary.find(lyTitle, "Brent Faiyaz", "Trust") != null,
+			"a file named after the title alone is the last resort, for a song with no artist in its name");
+		expect(LyricsLibrary.find(lyTitle, "Brent Faiyaz", "Trustfall") == null,
+			"a different song in the same folder is not read as this one");
+		expect(LyricsLibrary.find(lyFolder.resolve("missing"), "Brent Faiyaz", "Trust") == null
+			&& LyricsLibrary.find(null, "a", "b") == null,
+			"a folder that is not there is no lyrics rather than a crash");
+		expect(!LyricsLibrary.read(lyFolder.resolve("absent.lrc")).present(),
+			"a file that cannot be read is no lyrics");
+
+		java.nio.file.Path lyUtf8 = java.nio.file.Files.createTempDirectory("minetunes-utf8");
+		java.nio.file.Files.writeString(lyUtf8.resolve("A - T.lrc"), "[00:01.00]Caf\u00e9");
+		expect(LyricsLibrary.read(lyUtf8.resolve("A - T.lrc")).at(0).text().equals("Caf\u00e9"),
+			"a UTF-8 file keeps its accented letters");
+		java.nio.file.Path lyLegacy = java.nio.file.Files.createTempDirectory("minetunes-legacy");
+		byte[] lyLatin1 = {0x5B, 0x30, 0x30, 0x3A, 0x30, 0x31, 0x2E, 0x30, 0x30, 0x5D, (byte) 0xE9};
+		java.nio.file.Files.write(lyLegacy.resolve("A - T.lrc"), lyLatin1);
+		expect(LyricsLibrary.read(lyLegacy.resolve("A - T.lrc")).at(0).text().equals("\u00e9"),
+			"a file saved in the old Windows encoding reads as accents instead of unreadable bytes");
+
+		java.nio.file.Path lySeed = java.nio.file.Files.createTempDirectory("minetunes-seed");
+		expect(LyricsLibrary.seedMissing(lySeed) == 1, "an empty folder gets the example file");
+		expect(LyricsLibrary.seedMissing(lySeed) == 0, "and a folder that already has it is left alone");
+		expect(LyricsLibrary.read(lySeed.resolve("example.lrc")).lines().size() == 4,
+			"the example really is a parseable file, not a note about one");
+		expect(LyricsLibrary.find(lySeed, "Brent Faiyaz", "Trust") == null,
+			"and it matches no real track, so seeding never draws words over a song");
+
+		// A fetcher that counts instead of throwing: a broken off-switch must fail a check
+		// that prints FAIL, not take the whole suite down before the later gates run.
+		CountingFetcher lyLocal = new CountingFetcher();
+		LyricsCache lyCache = new LyricsCache(lyLocal);
+		java.nio.file.Path lyCacheDir = java.nio.file.Files.createTempDirectory("minetunes-cache");
+		java.nio.file.Path lyCacheFile = lyCacheDir.resolve("A - T.lrc");
+		java.nio.file.Files.writeString(lyCacheFile, "[00:01.00]one");
+		expect(lyCache.of(lyCacheDir, "A", "T", false, 30.0).lines().size() == 1 && lyCache.file() != null,
+			"the cache resolves the track it was handed");
+		expect(!lyCache.of(lyCacheDir, "B", "T", false, 30.0).present() && lyCache.file() == null,
+			"another artist with the same title is given no words at all");
+		expect(lyCache.of(lyCacheDir, "A", "T", false, 30.0).lines().size() == 1,
+			"and coming back to the first track finds its file again");
+		java.nio.file.Files.writeString(lyCacheFile, "[00:01.00]one\n[00:02.00]two");
+		expect(lyCache.of(lyCacheDir, "A", "T", false, 30.0).lines().size() == 1,
+			"the file is not re-read on every frame, which is what keeps the card's cost flat");
+		Thread.sleep(1100L);
+		expect(lyCache.of(lyCacheDir, "A", "T", false, 30.0).lines().size() == 2,
+			"but a file the player edits is picked up while the track is still playing");
+		expect(lyLocal.calls == 0,
+			"and a folder that answers every frame opens no lookup at all, got " + lyLocal.calls);
+
+		NowPlaying lyTrack = playing("Playing", "Trust", "Brent Faiyaz", "Bj\u00f6rk", 12.0, 158.4);
+		HudLayout.Frame lyCard = frame(lyTrack, 640, 360);
+		Recorder lyRuler = new Recorder();
+		LyricsLayout.Frame lyPanel = LyricsLayout.frame(lyRuler, lySample, 12.0, lyCard, 640, 360);
+		expect(lyPanel.y() == lyCard.y() + lyCard.height() + LyricsLayout.GAP,
+			"the panel sits one gap under the card when the screen has room, got " + lyPanel.y());
+		expect(lyPanel.x() == lyCard.x() && lyPanel.width() >= lyCard.width(),
+			"it starts on the card's edge and is never narrower than the card");
+		expect(lyPanel.height() == LyricsLayout.height(),
+			"and is exactly tall enough for three lines");
+		expect(lyPanel.current() == 0 && lyPanel.first() == 0,
+			"at 12s the first line is current and the window starts there");
+
+		StringBuilder lyMany = new StringBuilder();
+		for (int index = 0; index < 10; index++) {
+			lyMany.append(String.format("[00:%02d.00]Line %d%n", index * 2 + 2, index + 1));
+		}
+
+		Lyrics lyTen = Lyrics.parse(lyMany.toString());
+		LyricsLayout.Frame lyMid = LyricsLayout.frame(lyRuler, lyTen, 12.0, lyCard, 640, 360);
+		expect(lyMid.current() == 5 && lyMid.first() == 4,
+			"the line being sung stays in the middle of the window, got " + lyMid.current() + "/" + lyMid.first());
+		LyricsLayout.Frame lyEnd = LyricsLayout.frame(lyRuler, lyTen, 60.0, lyCard, 640, 360);
+		expect(lyEnd.current() == 9 && lyEnd.first() == 7,
+			"at the end the window stops sliding and fills the panel, got " + lyEnd.first());
+		LyricsLayout.Frame lyStart = LyricsLayout.frame(lyRuler, lyTen, 0.0, lyCard, 640, 360);
+		expect(lyStart.current() == -1 && lyStart.first() == 0,
+			"before the first stamp nothing is highlighted, but the words still show");
+
+		Lyrics lyDrift = Lyrics.parse("[00:01.00]a\n[00:02.00]b\n[00:03.00]c\n[00:04.00]d\n[00:05.00]e\n"
+			+ "[00:06.00]a much longer line than anything on screen right now\n[00:07.00]g");
+		LyricsLayout.Frame lySteady = LyricsLayout.frame(lyRuler, lyDrift, 2.0, lyCard, 640, 360);
+		expect(lySteady.width() > lyCard.width(),
+			"the width comes from the widest line in the file rather than the three on screen, so the panel "
+				+ "does not breathe as the song moves, got " + lySteady.width());
+
+		Lyrics lyWide = Lyrics.parse("[00:01.00]" + "x".repeat(120));
+		LyricsLayout.Frame lyCapped = LyricsLayout.frame(lyRuler, lyWide, 2.0, lyCard, 640, 360);
+		expect(lyCapped.width() == LyricsLayout.MAX_WIDTH,
+			"a line wider than any panel is capped, got " + lyCapped.width());
+		LyricsLayout.Frame lyNarrow = LyricsLayout.frame(lyRuler, lyWide, 2.0, lyCard, 200, 360);
+		expect(lyNarrow.width() <= 200, "and the panel never leaves the screen it is drawn on");
+
+		Recorder lyFull = new Recorder();
+		LyricsLayout.draw(lyFull, lyPanel, Palette.GREEN, true);
+		List<Op> lyLines = lyFull.kind("text");
+		expect(lyLines.size() == 3, "all three lines are drawn, got " + lyLines.size());
+		expect(lyLines.get(0).y1() == lyPanel.y() + LyricsLayout.PAD
+			&& lyLines.get(1).y1() == lyLines.get(0).y1() + LyricsLayout.LINE + LyricsLayout.LINE_GAP,
+			"the rows are one line and one gap apart");
+		expect(lyLines.get(0).colour() == Palette.WHITE,
+			"the line being sung is the brightest ink on the panel");
+		expect(lyLines.get(1).colour() != lyLines.get(0).colour()
+			&& lyLines.get(2).colour() == lyLines.get(1).colour(),
+			"the two neighbours share a dimmer ink, so the current line is the only one lit");
+		expect(lyLines.get(0).text().equals("First line") && lyLines.get(1).text().equals("Second line"),
+			"the window shows the line the clock is on and the one after it");
+		for (Op op : lyLines) {
+			expect(op.x1() >= lyPanel.x() + LyricsLayout.PAD
+				&& op.x2() <= lyPanel.x() + lyPanel.width() - LyricsLayout.PAD,
+				"every line stays inside the panel's side padding");
+			expect(op.y1() >= lyPanel.y() + LyricsLayout.PAD
+				&& op.y2() <= lyPanel.y() + lyPanel.height() - LyricsLayout.PAD + 1,
+				"every line stays inside its top and bottom padding");
+			expect(Math.abs((op.x1() - lyPanel.x()) - (lyPanel.x() + lyPanel.width() - op.x2())) <= 1,
+				"each line is centred in the panel");
+		}
+
+		Recorder lyCut = new Recorder();
+		LyricsLayout.draw(lyCut, lyCapped, Palette.GREEN, true);
+		List<Op> lyCutLines = lyCut.kind("text");
+		expect(lyCutLines.size() == 1 && lyCutLines.get(0).text().endsWith("...")
+			&& lyRuler.textWidth(lyCutLines.get(0).text()) <= lyCapped.width() - 2 * LyricsLayout.PAD,
+			"a line too wide for the capped panel is cut with dots rather than written over the border, got \""
+				+ (lyCutLines.isEmpty() ? "" : lyCutLines.get(0).text()) + "\"");
+
+		LyricsLayout.Frame lyHole = LyricsLayout.frame(lyRuler, lyGap, 3.5, lyCard, 640, 360);
+		Recorder lyHoleDraw = new Recorder();
+		LyricsLayout.draw(lyHoleDraw, lyHole, Palette.GREEN, true);
+		expect(lyHoleDraw.kind("text").size() == 2,
+			"a timed gap draws nothing in its row, so the previous line is not left standing through it");
+
+		Recorder lyPausedDraw = new Recorder();
+		LyricsLayout.draw(lyPausedDraw, lyPanel, Palette.GREEN, false);
+		expect(lyPausedDraw.kind("fill").size() == lyFull.kind("fill").size(),
+			"a paused lyric panel keeps its shape");
+		Op lyLiveBand = lyricBand(lyFull, lyPanel);
+		Op lyPausedBand = lyricBand(lyPausedDraw, lyPanel);
+		expect(alphaOf(lyPausedBand.colour()) < alphaOf(lyLiveBand.colour()),
+			"a paused panel dims with the card instead of staying lit");
+		expect((lyPausedBand.colour() & 0xFFFFFF) == (lyLiveBand.colour() & 0xFFFFFF),
+			"and dimming is a multiplier, not a different colour");
+
+		HudLayout.Frame lyLow = placeFrame(DeckSkin.BUILT_IN, lyTrack, 200, 640, 300);
+		LyricsLayout.Frame lyFlipped = LyricsLayout.frame(lyRuler, lySample, 12.0, lyLow, 640, 300);
+		expect(lyFlipped.y() + lyFlipped.height() == lyLow.y() - LyricsLayout.GAP,
+			"a card near the bottom of the screen gets its lyrics above it, not off the edge");
+		HudLayout.Frame lyTight = placeFrame(DeckSkin.BUILT_IN, lyTrack, 20, 640, 120);
+		LyricsLayout.Frame lySqueezed = LyricsLayout.frame(lyRuler, lySample, 12.0, lyTight, 640, 120);
+		expect(lyTight.y() + lyTight.height() + LyricsLayout.GAP + LyricsLayout.height() > 120
+			&& lyTight.y() - LyricsLayout.GAP - LyricsLayout.height() < 0,
+			"the fixture card leaves room on neither side, so the panel has to cover it");
+		expect(lySqueezed.y() >= 0 && lySqueezed.y() + lySqueezed.height() <= 120,
+			"a window too short for both still keeps the panel on screen, got " + lySqueezed.y());
+		// With room on neither side the panel must cover something, so it covers the emptier
+		// half. Two cards a line apart on one screen put it at opposite ends, which is what
+		// says the choice is made from the room rather than from a fixed side.
+		expect(lySqueezed.y() == 120 - lySqueezed.height(),
+			"a squeezed panel takes the side with more room, here the bottom, got " + lySqueezed.y());
+		HudLayout.Frame lyHigh = placeFrame(DeckSkin.BUILT_IN, lyTrack, 28, 640, 120);
+		LyricsLayout.Frame lyOverlap = LyricsLayout.frame(lyRuler, lySample, 12.0, lyHigh, 640, 120);
+		expect(lyHigh.y() > 120 - (lyHigh.y() + lyHigh.height())
+			&& lyOverlap.y() == 0,
+			"and the other end when that is the emptier one, got " + lyOverlap.y());
+		HudLayout.Frame lyRight = placeFrame(DeckSkin.BUILT_IN, lyTrack, 634, 640, 360);
+		LyricsLayout.Frame lyRightPanel = LyricsLayout.frame(lyRuler, lySample, 12.0, lyRight, 640, 360);
+		expect(lyRight.mirror(), "the fixture card really is parked against the right edge");
+		expect(lyRightPanel.x() + lyRightPanel.width() == lyRight.x() + lyRight.width()
+			&& lyRightPanel.x() >= 0 && lyRightPanel.x() + lyRightPanel.width() <= 640,
+			"a right-parked card's lyrics align to the same edge the card reads from");
+
+		// A narrow panel is the same width as the card, so it says nothing about which edge
+		// the two were aligned on. This one is wider than the card and the card is not flush
+		// with the screen, so aligning to the left edge instead puts the panel off the
+		// screen's edge rather than the card's.
+		Lyrics lyLong = Lyrics.parse("[00:01.00]wide words that push this panel past the card");
+		HudLayout.Frame lyParked = placeFrame(DeckSkin.BUILT_IN, lyTrack, 440, 640, 360);
+		LyricsLayout.Frame lyOverhang = LyricsLayout.frame(lyRuler, lyLong, 12.0, lyParked, 640, 360);
+		expect(lyParked.mirror() && lyOverhang.width() > lyParked.width(),
+			"the fixture widens the panel past a card that is not flush with the screen, got "
+				+ lyOverhang.width() + " against " + lyParked.width());
+		expect(lyOverhang.x() < lyParked.x()
+			&& lyOverhang.x() + lyOverhang.width() == lyParked.x() + lyParked.width(),
+			"a right-parked card's words grow away from the screen edge, so they end where the card ends");
+
+		// --- the words are their own object: wherever the player drops them, however big ---
+		LyricsLayout.Frame lyHandX = LyricsLayout.frame(lyRuler, lySample, 12.0, lyCard,
+			new LyricsLayout.Options(120, LyricsLayout.AUTO, LyricsLayout.AUTO, LyricsLayout.AUTO,
+				LyricsLayout.LINES), 640, 360);
+		expect(lyHandX.x() == 120,
+			"a panel dragged sideways is drawn where it was dropped, got " + lyHandX.x());
+		LyricsLayout.Frame lyHandY = LyricsLayout.frame(lyRuler, lySample, 12.0, lyCard,
+			new LyricsLayout.Options(LyricsLayout.AUTO, 40, LyricsLayout.AUTO, LyricsLayout.AUTO,
+				LyricsLayout.LINES), 640, 360);
+		expect(lyHandY.y() == 40,
+			"and a panel dragged up is no longer under the card, got " + lyHandY.y());
+
+		LyricsLayout.Frame lySized = LyricsLayout.frame(lyRuler, lySample, 12.0, lyCard,
+			new LyricsLayout.Options(120, 40, 200, 75, LyricsLayout.LINES), 640, 360);
+		expect(lySized.width() == 200,
+			"a width the player set is the width that is drawn, got " + lySized.width());
+		expect(lySized.height() == 75 && lySized.rows() == 6,
+			"a taller box buys more rows rather than stretching three, got " + lySized.rows()
+				+ " in " + lySized.height());
+		int lyTopSlack = lySized.lineY(0) - lySized.y();
+		int lyBottomSlack = lySized.y() + lySized.height() - (lySized.lineY(lySized.rows() - 1) + LyricsLayout.LINE);
+		expect(Math.abs(lyTopSlack - lyBottomSlack) <= 1,
+			"the rows are centred in a taller box, got " + lyTopSlack + " above and " + lyBottomSlack + " below");
+		LyricsLayout.Frame lyMore = LyricsLayout.frame(lyRuler, lySample, 12.0, lyCard,
+			new LyricsLayout.Options(120, 40, 200, LyricsLayout.AUTO, 5), 640, 360);
+		expect(lyMore.rows() == 5 && lyMore.height() == LyricsLayout.height(5),
+			"the line count is the tallest window an automatic height gives, got " + lyMore.rows());
+
+		LyricsLayout.Frame lyCrammed = LyricsLayout.frame(lyRuler, lySample, 12.0, lyCard,
+			new LyricsLayout.Options(600, 340, 200, 100, LyricsLayout.LINES), 640, 360);
+		expect(lyCrammed.x() == 640 - lyCrammed.width() && lyCrammed.x() + lyCrammed.width() == 640,
+			"a box dragged past the right edge is pulled back on screen, got " + lyCrammed.x());
+		expect(lyCrammed.y() == 360 - lyCrammed.height() && lyCrammed.y() + lyCrammed.height() == 360,
+			"and one dragged past the bottom is pulled up, got " + lyCrammed.y());
+
+		// The grip is a square in the corner: it shrinks with a box smaller than itself, so a
+		// one-line panel still has a whole corner to grab, and only that corner resizes.
+		LyricsLayout.Frame lyTiny = LyricsLayout.frame(lyRuler, lySample, 12.0, lyCard,
+			new LyricsLayout.Options(0, 0, LyricsLayout.MIN_WIDTH, 5, LyricsLayout.LINES), 640, 360);
+		expect(lyTiny.grip().w() == 5 && lyTiny.grip().h() == 5,
+			"the grip shrinks to fit a box smaller than it is, got " + lyTiny.grip().w());
+		expect(lyTiny.grip().x() + lyTiny.grip().w() == lyTiny.x() + lyTiny.width()
+			&& lyTiny.grip().y() + lyTiny.grip().h() == lyTiny.y() + lyTiny.height(),
+			"and sits in the bottom-right corner, the one the mouse drags");
+		expect(!lyTiny.gripHolds(lyTiny.x() + lyTiny.width() / 2.0, lyTiny.y() + lyTiny.height() / 2.0)
+			&& lyTiny.gripHolds(lyTiny.x() + lyTiny.width() - 1, lyTiny.y() + lyTiny.height() - 1),
+			"only the corner resizes: the middle of the box is a drag");
+
+		// --- the panel's own custom UI: band, alpha, and the editor's marks ---
+		Recorder lyNoBand = new Recorder();
+		LyricsLayout.draw(lyNoBand, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(false, 0.0, false));
+		boolean lyBandDrawn = lyNoBand.kind("fill").stream()
+			.anyMatch(op -> op.x1() == lyPanel.x() + 1 && op.y1() == lyPanel.y() + 2);
+		expect(!lyBandDrawn && lyNoBand.kind("text").size() == 3,
+			"a panel switched off keeps the words and drops the band, got "
+				+ lyNoBand.kind("text").size() + " lines");
+		Recorder lyHalf = new Recorder();
+		LyricsLayout.draw(lyHalf, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(true, 0.5, false));
+		expect(alphaOf(lyricBand(lyHalf, lyPanel).colour()) == 128,
+			"an opacity set by hand is the alpha that is drawn, got "
+				+ alphaOf(lyricBand(lyHalf, lyPanel).colour()));
+		Recorder lyFaint = new Recorder();
+		LyricsLayout.draw(lyFaint, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(true, 0.01, false));
+		expect(alphaOf(lyricBand(lyFaint, lyPanel).colour()) == Math.round(255 * LyricsLayout.MIN_OPACITY),
+			"and never below the floor that keeps the words on their band, got "
+				+ alphaOf(lyricBand(lyFaint, lyPanel).colour()));
+		Recorder lyEdit = new Recorder();
+		LyricsLayout.draw(lyEdit, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(true, 0.0, true));
+		long lyDots = lyEdit.kind("fill").stream()
+			.filter(op -> op.x2() - op.x1() == 2 && op.y2() - op.y1() == 2)
+			.count();
+		expect(lyDots == 3, "the editor draws the three grip dots the mouse grabs, got " + lyDots);
+		long lyPlainDots = lyFull.kind("fill").stream()
+			.filter(op -> op.x2() - op.x1() == 2 && op.y2() - op.y1() == 2)
+			.count();
+		expect(lyPlainDots == 0, "and an ordinary panel carries no editor marks, got " + lyPlainDots);
+
+		Ink lyInk = new Ink();
+		LyricsLayout.draw(lyInk, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(true, 0.0, false));
+		expect(lyInk.shadows.size() == 3 && lyInk.shadows.get(0)
+			&& !lyInk.shadows.get(1) && !lyInk.shadows.get(2),
+			"on a band only the line being sung takes a shadow, got " + lyInk.shadows);
+		Ink lyBare = new Ink();
+		LyricsLayout.draw(lyBare, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(false, 0.0, false));
+		expect(lyBare.shadows.size() == 3 && !lyBare.shadows.contains(Boolean.FALSE),
+			"with the band gone every line takes one, so a dim neighbour stays readable, got " + lyBare.shadows);
+
+		// A deck is the custom UI of the card, and the words are part of the card: the band
+		// under them is painted from the same deck's colour, not from the shipped one.
+		DeckSkin lyDeck = gateDeck("{\"panel\":\"#FF112233\"}");
+		HudLayout.Frame lyDeckCard = deckFrame(lyDeck, lyTrack, 640, 360);
+		LyricsLayout.Frame lyDeckPanel = LyricsLayout.frame(lyRuler, lySample, 12.0, lyDeckCard, 640, 360);
+		Recorder lyDeckPaint = new Recorder();
+		LyricsLayout.draw(lyDeckPaint, lyDeckPanel, Palette.GREEN, true);
+		expect(lyDeckPanel.skin() == lyDeck && lyricBand(lyDeckPaint, lyDeckPanel).colour() == lyDeck.panel(),
+			"the words wear the deck the card is wearing, got "
+				+ Integer.toHexString(lyricBand(lyDeckPaint, lyDeckPanel).colour()));
+
+		String lyHud = codeOnly(CLIENT_DIR + "NowPlayingHud.java");
+		expect(count(lyHud, "LyricsLayout.draw(") == 1, "the card paints the lyric panel it measured");
+		expect(lyHud.contains("lyrics.of(MediaConfig.lyrics(), playing.artist(), playing.title(),\n\t\t\tconfig.onlineLyrics, playing.duration());"),
+			"and asks for the words of the track it is drawing, with the online switch and the length");
+		expect(!lyHud.contains("HttpClient") && !lyHud.contains("LyricsFetcher"),
+			"the draw path owns no socket: a lookup is the cache's business, never the frame's");
+		String lyCommand = codeOnly(CLIENT_DIR + "MusicDeckCommand.java");
+		expect(lyCommand.contains("literal(\"lyrics\")"), "the lyrics folder is reachable from the command");
+		expect(lyCommand.contains("LyricsLibrary.find("),
+			"and the command reports the same file the card reads");
+		expect(lyCommand.contains("online(client, context, true)") && lyCommand.contains("online(client, context, false)"),
+			"the online lookup can be turned on and off from the command");
+		String lyConfig = codeOnly(CLIENT_DIR + "MediaConfig.java");
+		expect(lyConfig.contains("LyricsLibrary.seedMissing(lyrics())"),
+			"the lyrics folder is seeded with its example the way the deck folder is");
+		expect(lyConfig.contains("Boolean.parseBoolean(props.getProperty(\"onlineLyrics\", \"true\"))")
+			&& lyConfig.contains("props.setProperty(\"onlineLyrics\""),
+			"the online switch is stored in musicdeck.properties and is on for a fresh install");
+
+		// --- the placement editor answers both boxes, and the lyric knobs persist ---
+		String lyLayoutScreen = codeOnly(CLIENT_DIR + "LayoutScreen.java");
+		expect(lyLayoutScreen.contains("panel.gripHolds(mx, my)")
+			&& lyLayoutScreen.indexOf("panel.gripHolds(mx, my)") < lyLayoutScreen.indexOf("panel.holds(mx, my)"),
+			"the move screen picks the grip before the box, so its corner resizes instead of dragging");
+		expect(count(lyLayoutScreen, "config.lyricsX = Integer.toString(panel.x());") >= 2
+			&& count(lyLayoutScreen, "config.lyricsY = Integer.toString(panel.y());") >= 2
+			&& count(lyLayoutScreen, "config.lyricsWidth = Integer.toString(clampWidth(") >= 2,
+			"every resize pins the box it grew from, so an attached panel cannot slip out from under the pointer");
+		expect(lyLayoutScreen.contains("config.lyricsX = homeLyricsX;")
+			&& lyLayoutScreen.contains("config.lyricsY = homeLyricsY;")
+			&& lyLayoutScreen.contains("config.lyricsWidth = homeLyricsWidth;")
+			&& lyLayoutScreen.contains("config.lyricsHeight = homeLyricsHeight;"),
+			"ESC puts back the words' box as well as the card's place");
+
+		expect(java.util.regex.Pattern.compile("new LyricsLayout\\.Options\\(config\\.lyricsX\\(\\), config\\.lyricsY\\(\\), "
+			+ "config\\.lyricsWidth\\(\\),\\s*config\\.lyricsHeight\\(\\), config\\.lyricsLines\\(\\)\\)")
+			.matcher(lyHud).find(),
+			"the card asks the layout for the box the player set, on every frame");
+		expect(lyHud.contains("new LyricsLayout.Style(config.lyricsPanel, config.lyricsOpacity(), editing())"),
+			"and paints it with the panel switches the custom-UI page writes");
+		expect(lyHud.contains("if (!words.present() && editing())"),
+			"the move screen has words to drag even while nothing is playing, and only then");
+		expect(lyHud.contains("this.words = panel;"),
+			"the frame the editor grabs is the frame that was painted");
+
+		String lyVerbs = codeOnly(CLIENT_DIR + "MusicDeckCommand.java");
+		expect(lyVerbs.contains("literal(\"place\")") && lyVerbs.contains("lyricPlace(client, context)"),
+			"the command can put the words at a point");
+		expect(lyVerbs.contains("literal(\"size\")") && lyVerbs.contains("lyricSize(client, context)"),
+			"and give them a width and a height");
+		expect(lyVerbs.contains("literal(\"reset\")") && lyVerbs.contains("lyricReset(client, context)"),
+			"and put every lyric setting back to auto");
+
+		expect(lyConfig.contains("props.getProperty(\"lyricsX\", AUTO)")
+			&& lyConfig.contains("props.setProperty(\"lyricsX\"")
+			&& lyConfig.contains("props.getProperty(\"lyricsWidth\", AUTO)")
+			&& lyConfig.contains("props.setProperty(\"lyricsWidth\"")
+			&& lyConfig.contains("props.getProperty(\"lyricsHeight\", AUTO)")
+			&& lyConfig.contains("props.setProperty(\"lyricsHeight\"")
+			&& lyConfig.contains("props.getProperty(\"lyricsPanel\", \"true\")")
+			&& lyConfig.contains("props.setProperty(\"lyricsPanel\"")
+			&& lyConfig.contains("props.getProperty(\"lyricsOpacity\", AUTO)")
+			&& lyConfig.contains("props.setProperty(\"lyricsOpacity\""),
+			"every lyric knob survives a restart: each is read and written in musicdeck.properties");
+		expect(lyConfig.contains("AUTO.equalsIgnoreCase(value)")
+			&& lyConfig.contains("return LyricsLayout.AUTO;"),
+			"auto is a word in the file, and anything unreadable follows the card rather than landing at zero");
+		expect(lyConfig.contains("raw.endsWith(\"%\")") && lyConfig.contains("Math.max(LyricsLayout.MIN_OPACITY"),
+			"an opacity is a percentage with or without its sign, and never below the floor the layout paints");
+
+		// --- the online lookup, which is the mod's only network traffic ---
+		List<String> lyUrls = LyricsFetcher.urls("Brent Faiyaz", "Trust", 158.4);
+		expect(lyUrls.size() == 2
+			&& lyUrls.get(0).equals("https://lrclib.net/api/get?artist_name=Brent%20Faiyaz&track_name=Trust&duration=158"),
+			"the lookup names the track and its length, got " + lyUrls);
+		expect(lyUrls.get(1).endsWith("&track_name=Trust") && !lyUrls.get(1).contains("duration"),
+			"and retries without the length, because a remaster can be a second off");
+		expect(LyricsFetcher.urls("A", "B", 0.0).size() == 1
+			&& !LyricsFetcher.urls("A", "B", 0.0).get(0).contains("duration"),
+			"a track with no known length is asked for without one");
+		expect(LyricsFetcher.query("AC/DC & Friends + 100%")
+			.equals("AC%2FDC%20%26%20Friends%20%2B%20100%25"),
+			"every character that could split the query is escaped, got " + LyricsFetcher.query("AC/DC & Friends + 100%"));
+		expect(LyricsFetcher.query("Caf\u00e9").equals("Caf%C3%A9"),
+			"an accented name goes out as UTF-8 bytes rather than a question mark");
+		expect(LyricsFetcher.synced("{\"instrumental\":false,\"syncedLyrics\":\"[00:01.00]a\\n[00:02.00]b\"}")
+			.equals("[00:01.00]a\n[00:02.00]b"),
+			"the synced words are read out of the answer with their newlines intact");
+		expect(LyricsFetcher.synced("{\"syncedLyrics\":null}").isEmpty()
+			&& LyricsFetcher.synced("{\"instrumental\":true,\"syncedLyrics\":\"[00:01.00]a\"}").isEmpty()
+			&& LyricsFetcher.synced("not json").isEmpty(),
+			"no words, an instrumental and a broken answer are all nothing to draw");
+
+		String lyName = LyricsFetcher.fileName("AC/DC", "Back: In Black?");
+		expect(lyName.endsWith(".lrc") && !lyName.matches(".*[\\\\/:*?\"<>|].*"),
+			"a fetched file's name carries no character Windows forbids, got " + lyName);
+		expect(LyricsLibrary.key(lyName.substring(0, lyName.length() - 4))
+			.equals(LyricsLibrary.key("AC/DC - Back: In Black?")),
+			"and still keys to the track it belongs to, so the file is found on the next play");
+		expect(LyricsFetcher.fileName("A", "Title.").equals("A - Title.lrc"),
+			"a trailing dot, which Windows silently drops, is dropped here too");
+		expect(LyricsFetcher.fileName("", "").equals("lyrics.lrc")
+			&& LyricsFetcher.fileName("", "Only A Title").equals("Only A Title.lrc"),
+			"an empty name still makes a usable file, and a title with no artist keeps its own name");
+		expect(LyricsFetcher.fileName("Artist", "x".repeat(400)).length() <= 100,
+			"a very long title is cut rather than making a path Windows refuses");
+
+		java.nio.file.Path lyFetchDir = java.nio.file.Files.createTempDirectory("minetunes-fetch");
+		Lyrics lyFetched = LyricsFetcher.save(lyFetchDir, "A", "T",
+			"{\"syncedLyrics\":\"[00:01.00]a\\n[00:02.00]b\"}");
+		java.nio.file.Path lyFetchedFile = lyFetchDir.resolve("A - T.lrc");
+		expect(lyFetched.lines().size() == 2 && java.nio.file.Files.exists(lyFetchedFile)
+			&& LyricsLibrary.read(lyFetchedFile).lines().size() == 2,
+			"a hit is written into the folder and reads back through the same parser");
+		// A folder of its own, because a file that already exists would hide whether the
+		// refusal happened or the write was merely blocked by the no-clobber rule.
+		java.nio.file.Path lyPlainDir = java.nio.file.Files.createTempDirectory("minetunes-plain");
+		expect(!LyricsFetcher.save(lyPlainDir, "A", "T", "{\"syncedLyrics\":\"plain words only\"}").present()
+			&& !java.nio.file.Files.exists(lyPlainDir.resolve("A - T.lrc")),
+			"words without timestamps are neither drawn nor saved as a file the panel cannot use");
+		java.nio.file.Files.writeString(lyFetchedFile, "[00:09.00]mine");
+		LyricsFetcher.save(lyFetchDir, "A", "T", "{\"syncedLyrics\":\"[00:01.00]theirs\"}");
+		expect(LyricsLibrary.read(lyFetchedFile).at(0).text().equals("mine"),
+			"a fetched file never overwrites one that is already there");
+
+		java.nio.file.Path lyOnlineDir = java.nio.file.Files.createTempDirectory("minetunes-online");
+		CountingFetcher lyOff = new CountingFetcher();
+		LyricsCache lyOffCache = new LyricsCache(lyOff);
+		expect(!lyOffCache.of(lyOnlineDir, "A", "T", false, 30.0).present() && lyOff.calls == 0,
+			"online off is no request at all, not a request thrown away");
+		CountingFetcher lyOn = new CountingFetcher();
+		lyOn.answer = Lyrics.parse("[00:01.00]a\n[00:02.00]b");
+		LyricsCache lyOnCache = new LyricsCache(lyOn);
+		expect(lyOnCache.of(lyOnlineDir, "A", "T", true, 30.0).lines().size() == 2,
+			"a miss with online on shows what the lookup came back with");
+		expect(lyOn.calls == 1 && Math.abs(lyOn.lastDuration - 30.0) < 0.001,
+			"one request per track, carrying the length the card knows");
+		expect(lyOnCache.of(lyOnlineDir, "A", "T", true, 30.0).lines().size() == 2 && lyOn.calls == 1,
+			"and sixty frames later it is still the same single request");
+		// The folder is rechecked once a second, so a request that is only kept by that window
+		// is requested again the moment it lapses. Step past it before asking a second question.
+		Thread.sleep(1100L);
+		expect(lyOnCache.of(lyOnlineDir, "A", "T", true, 30.0).lines().size() == 2 && lyOn.calls == 1,
+			"and a second later it is still that request, not a fresh one every frame");
+		// That answer just reset the same window, so step past it again: turning the switch off
+		// must be seen by the branch that decides, not short-circuited by the recheck timer.
+		Thread.sleep(1100L);
+		expect(lyOnCache.of(lyOnlineDir, "A", "T", false, 30.0).lines().size() == 2,
+			"words that already arrived stay on screen after the switch goes off");
+		lyOnCache.of(lyOnlineDir, "C", "T", false, 30.0);
+		expect(lyOn.calls == 1, "and nothing new is asked for while it is off");
+		lyOnCache.of(lyOnlineDir, "A", "U", true, 30.0);
+		expect(lyOn.calls == 2, "a different track is a different lookup");
+		CountingFetcher lyBroken = new CountingFetcher();
+		lyBroken.failure = new IllegalStateException("no network");
+		LyricsCache lyBrokenCache = new LyricsCache(lyBroken);
+		expect(!lyBrokenCache.of(lyOnlineDir, "B", "T", true, 30.0).present(),
+			"a lookup that fails is no lyrics rather than a crash");
+		lyBrokenCache.of(lyOnlineDir, "B", "T", true, 30.0);
+		Thread.sleep(1100L);
+		lyBrokenCache.of(lyOnlineDir, "B", "T", true, 30.0);
+		expect(lyBroken.calls == 1, "and a failure is not retried every frame");
+
+		String lyFetch = codeOnly(CLIENT_DIR + "LyricsFetcher.java");
+		expect(lyFetch.contains("sendAsync(") && !lyFetch.contains(".send(") && !lyFetch.contains(".join("),
+			"the request never blocks the caller");
+		expect(lyFetch.contains("timeout(TIMEOUT)") && lyFetch.contains("connectTimeout(TIMEOUT)"),
+			"a request that hangs is abandoned instead of holding the answer forever");
+		expect(lyFetch.contains("header(\"User-Agent\", AGENT)") && lyFetch.contains("MineTunes"),
+			"the service is told which program is asking");
+		expect(lyFetch.contains("https://lrclib.net"), "and the only host in the file is lrclib.net");
+
+		for (java.nio.file.Path lyTemp : List.of(lyFolder, lyLoose, lyTitle, lyUtf8, lyLegacy, lySeed,
+			lyCacheDir, lyFetchDir, lyPlainDir, lyOnlineDir)) {
+			deleteTree(lyTemp);
+		}
 
 		System.out.println(failed == 0 ? "ALL " + passed + " CHECKS PASSED" : failed + " OF "
 			+ (passed + failed) + " CHECKS FAILED");
 		System.exit(failed == 0 ? 0 : 1);
+	}
+
+	/**
+	 * A fetcher that answers from a field instead of a socket.
+	 *
+	 * The cache's rules - a file beats the network, one lookup per track, a failure is no
+	 * lyrics - are the part that can go wrong, and they are all answerable without a
+	 * network if the answer is handed in.
+	 */
+	static final class CountingFetcher extends LyricsFetcher {
+		int calls;
+		double lastDuration = -1.0;
+		Lyrics answer = Lyrics.EMPTY;
+		RuntimeException failure;
+
+		@Override
+		public java.util.concurrent.CompletableFuture<Lyrics> request(java.nio.file.Path directory,
+			String artist, String title, double duration) {
+			calls++;
+			lastDuration = duration;
+			if (failure != null) {
+				return java.util.concurrent.CompletableFuture.failedFuture(failure);
+			}
+
+			return java.util.concurrent.CompletableFuture.completedFuture(answer);
+		}
 	}
 }

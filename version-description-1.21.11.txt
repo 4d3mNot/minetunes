@@ -1,0 +1,67 @@
+MINETUNES - PAGE TEXT FOR MINECRAFT 1.21.11
+===========================================
+File to upload: releases/minetunes-1.0.0.jar
+Java 21, Fabric Loader 0.19.2+, Fabric API 0.141.6+1.21.11, Mod Menu optional (17.0.0).
+
+The CHANGELOG section goes in Modrinth's "Changelog" box or CurseForge's "File changelog" field for
+this file. The DESCRIPTION section stands alone as a page body.
+
+
+SHORT  (a one-line summary)
+-----
+A now-playing card on your HUD that controls whatever Windows is already playing, for Minecraft
+1.21.11. Java 21.
+
+
+DESCRIPTION  (page body, Markdown)
+-----------
+MineTunes puts a now-playing card on your HUD and lets you drive whatever Windows is already playing -
+Spotify, YouTube, a podcast, a video - without alt-tabbing. It reads the Windows SMTC media session,
+the same one your keyboard's media keys use, so it is not tied to any one player.
+
+This is the 1.21.11 build. It needs Fabric Loader 0.19.2 or newer, Fabric API 0.141.6+1.21.11 (or
+newer for 1.21.11) and Java 21. Mod Menu is optional - the mod runs and is fully configurable without
+it.
+
+Card, transport buttons, album art with the accent colour picked off the cover, sliding text,
+drag-anywhere placement that mirrors to face the corner it is parked in, six rebindable keybinds,
+`/music` commands, JSON decks you can drop into `config/musicdeck/decks/`, and synced lyrics in a panel of their own that can be dragged anywhere and stretched to any
+size: your
+own `.lrc` files are read first, and a track with none is looked up once on lrclib.net with the
+answer saved to the folder. Windows 10 or 11 only, client-side, with the lookup as the mod's
+only network traffic; nothing is sent to the Minecraft server.
+
+The 26.x builds of this mod are separate files on the same page. This jar will not load on 26.x and
+they will not load here.
+
+Known limits, and they are ceilings in the SMTC contract rather than bugs: there is no volume verb,
+so the mod can seek but cannot change your volume; many players hide shuffle and repeat, so the
+repeat button can come back with no effect; the session follows whoever took it last, so a Chrome
+video can steal it from your music app; position is extrapolated between reports; artwork can lag the
+text by up to a second on a track change; lyrics need either a local `.lrc` file or a hit on
+lrclib.net, so an obscure track, a bad title match or an offline machine leaves the panel empty;
+and the card's buttons only receive clicks while another screen is open - the keybinds and `/music`
+do not depend on that path.
+
+
+CHANGELOG  (Modrinth "Changelog" / CurseForge "File changelog")
+---------
+First release.
+
+- Now-playing card on the HUD: album sleeve, title, artist, album, elapsed time, progress bar and
+  four transport buttons.
+- Play / pause, previous, next, seek, shuffle and repeat over the Windows SMTC session.
+- Album art from the session with the panel accent picked off the cover; smooth and pixelated
+  scaling.
+- Slide-to-read text instead of truncation.
+- Drag-anywhere placement; the card mirrors to face whichever side it is parked on.
+- Transport buttons clickable while another screen is open.
+- Six rebindable keybinds in their own MineTunes category, plus a settings screen and Mod Menu entry.
+- Community decks: JSON files in `config/musicdeck/decks/`, three examples seeded.
+- Synced lyrics: your own `.lrc` files are used first, and a track with none is looked up once on
+  lrclib.net and saved into the lyrics folder, so the next play works offline.
+- The lyric panel is a box of its own: drag the words anywhere in the move screen (`U`), stretch
+  them sideways, downwards or both with the corner grip (or `Shift`+arrows), and set its band,
+  opacity and row count on the new **Lyrics...** page in settings, or with
+  `/music lyrics panel|lines|opacity|size|place|reset`.
+- Commands `/music` and `/minetunes`.

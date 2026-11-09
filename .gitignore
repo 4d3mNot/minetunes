@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+
+# Scratch compiles the test tooling writes: build-gate, build-mut, build-preview, build-art.
+# None of them are source, and the mutation suite recreates them every run.
+build-*/
+
+# The development Minecraft instance runClient creates, with its logs, options and saves.
+run/
+
+# Stray output from an IDE build.
+out/
+*.class
+*.log
+
+# Editors
+.idea/
+.vscode/
+*.iml

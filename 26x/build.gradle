@@ -1,0 +1,60 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+// One source tree, three 26.x targets. Only the numbers below differ per target; everything
+// else is shared, apart from the two API shims in src/client/versions/<target>.
+def targets = [
+	'26.1.2': [api: '0.155.3+26.1.2', modmenu: '18.0.2', depends: '>=26.1.2 <26.2'],
+	'26.2'  : [api: '0.161.0+26.2',   modmenu: '20.0.3', depends: '>=26.2 <26.3'],
+	'26.3'  : [api: '0.165.0+26.3',   modmenu: '21.0.0', depends: '>=26.3 <26.4'],
+]
+
+def target = targets[minecraft_version]
+if (target == null) {
+	throw new GradleException("Unknown target '${minecraft_version}'. Set -Pminecraft_version to one of ${targets.keySet()}")
+}
+
+version = "${mod_version}+${minecraft_version}"
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"musicdeck" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+sourceSets.client.java.srcDir "src/client/versions/${minecraft_version}/java"
+
+repositories {
+	maven { url = 'https://api.modrinth.com/maven' }
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${target.api}"
+	compileOnly "maven.modrinth:modmenu:${target.modmenu}"
+}
+
+processResources {
+	inputs.property "version", project.version
+	inputs.property "minecraft_depends", target.depends
+
+	filesMatching("fabric.mod.json") {
+		expand "version": project.version, "minecraft_depends": target.depends
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}

@@ -1,0 +1,132 @@
+MINETUNES - MODRINTHS PAGE TEXT
+===============================
+
+
+SUMMARY  (paste into the "Description" box - 120 chars, limit is 150)
+---------------------------------------------------------------------
+A now-playing card on your HUD that controls whatever Windows is already playing - Spotify, YouTube, a podcast, a video.
+
+
+BODY  (paste into the page editor, which takes Markdown)
+--------------------------------------------------------
+MineTunes puts a now-playing card on your HUD and lets you drive it without leaving the game.
+
+It reads the **Windows SMTC media session** - the same one your keyboard's media keys and the volume
+flyout use - so it is not tied to any one player. Whatever Windows says is playing is what the card
+shows.
+
+> **Requirements:** Minecraft **1.21.11**, **26.1.2**, **26.2** or **26.3** - download the jar whose
+> filename ends in `+` your game version. [Fabric API](https://modrinth.com/mod/fabric-api) for that
+> same version, Fabric Loader 0.19.2+ (0.19.3 on 26.x), Java 21+ (Java 25 on 26.x), and Windows
+> 10/11. SMTC is a Windows feature, so there is nothing to control on other systems.
+
+### What it does
+
+- A now-playing card: album sleeve, title, artist and album, elapsed time, progress bar and four
+  transport buttons.
+- Play / pause, previous, next, seek, shuffle and repeat, through the session the OS media keys use.
+- Album art pulled from the session, with the panel's accent colour picked off the cover.
+- Text that does not fit slides instead of being cut off.
+- Drag the card anywhere on screen. Park it past the middle and it mirrors to face that corner.
+- The buttons answer clicks while another screen is open - inventory, chat, Mod Menu - so you can skip
+  a track without closing what you were looking at.
+- Six keybinds in their own **MineTunes** category, rebindable in vanilla Controls or the mod's own
+  settings screen.
+- **Decks**: community-made looks in a plain JSON file. No code, no rebuild, and a dropped-in file
+  shows up the next time you open the picker.
+- **Lyrics**: the card shows the line being sung, in a panel of its own that starts under the card
+  and can be dragged anywhere, stretched to any box, and given its own look - band on or off, its
+  own opacity, one to nine rows. A `.lrc` you save in `config/musicdeck/lyrics/` is always used
+  first; a track with no file is looked up once on lrclib.net and the answer is saved in that
+  folder, so the next play works offline. `/music lyrics off` turns the lookup off and the mod then
+  makes no request at all.
+
+### Commands
+
+`/music` and `/minetunes` do the same thing.
+
+```
+/music status                      what the session says right now
+/music play | pause | toggle
+/music next | prev
+/music seek <seconds>
+/music shuffle [on|off]
+/music repeat [none|track|playlist]
+/music hud [x y]                   show, hide, or place the card
+/music move                        the drag screen
+/music style [smooth|pixel]        how the album art is scaled
+/music theme [auto|green|white]    panel colour
+/music deck [name]                 which deck to draw with
+/music lyrics                      whether the playing track has words, and where they go
+/music lyrics on | off             turn the lrclib.net lookup on or off
+/music lyrics panel [on|off]       the band behind the words
+/music lyrics lines <1-9>          how many rows the panel shows
+/music lyrics opacity <auto|%>     band alpha; auto follows the deck
+/music lyrics size <w> <h>         the box in GUI pixels, or auto
+/music lyrics place <x> <y>        where the box sits, or auto
+/music lyrics reset                back to under the card, three rows, the deck's own alpha
+/music settings                    the settings screen
+/music restart                     re-launch the media helper
+```
+
+### Files it writes
+
+| Path | What it is |
+| --- | --- |
+| `<game dir>/musicdeck.properties` | position, deck, theme, art style, visibility, the `onlineLyrics` switch, and the lyric box (`lyricsX/Y/Width/Height/Lines/Panel/Opacity`) |
+| `<game dir>/config/musicdeck/decks/` | your decks; three examples are seeded on first run |
+| `<game dir>/config/musicdeck/lyrics/` | your `.lrc` files and every lyric the lookup found; one example is seeded on first run |
+
+Client-side only. It registers no URL handler, needs no admin rights, and other players see nothing.
+
+Under the hood it launches Windows' own PowerShell as a helper process, which asks the local Windows
+media-session API what is playing and writes the answer to `<game dir>/musicdeck/`. Its only network
+traffic is the lyrics lookup: when a track has no local file and online lyrics is on, it sends an
+HTTPS GET to lrclib.net carrying the artist, the title and the track's length, and saves the answer
+in the lyrics folder. Nothing else leaves the machine, there is no telemetry, and `/music lyrics
+off` stops the lookup entirely. No registry changes, no elevation.
+
+### Known limits
+
+These are ceilings in the SMTC contract, not bugs:
+
+- **No volume verb.** The session exposes play, pause, skip and position, so the mod can seek but
+  cannot change your volume.
+- **Shuffle and repeat are often hidden.** Many players report neither verb as supported, so the
+  repeat button can do nothing. The mod sends the request and reports what the session said; it
+  cannot make a player obey.
+- **The session follows whoever took it last.** Starting a video in Chrome can steal it from your
+  music app, and the card changes with it.
+- **Position is extrapolated.** Some players only report a new position on a track change, so the bar
+  estimates in between.
+- **Artwork lags text** by up to a second on a track change - the thumbnail arrives after the title.
+- **Lyrics can be missing or mistimed.** The session carries a title, an artist and a position, never
+  the words, and Spotify keeps its lyrics inside its own window. The panel reads your `.lrc` files
+  first and only then asks lrclib.net, so an obscure track, an offline machine or a switched-off
+  lookup leaves a track with no panel. Timings come from whoever wrote the file, so a live take or a
+  remaster can drift from the audio.
+- **Click-through is the least proven part.** The card is drawn on the HUD, so its buttons only
+  receive a click when another screen is open. The keybinds and `/music` go through the same verbs
+  and do not depend on it.
+
+
+BEFORE YOU SAVE THE PAGE
+------------------------
+1. In Modrinth's "Dependencies" section, mark **Fabric API** as *required* and **Mod Menu** as
+   *optional*. Mod Menu is only a compile-time dependency here - the mod runs without it.
+2. Under "Environment", choose **Client only**.
+3. Under "External system interactions", turn it **on** and say what it is: "Reads the local Windows
+   media session (PowerShell helper) and, when a track has no local lyrics file, sends an HTTPS GET
+   to lrclib.net with the artist, title and track length. No telemetry; `/music lyrics off` disables
+   the request."
+4. The source link was left out because the GitHub repo has not been created or pushed yet. Add it
+   once it exists.
+5. Upload `publish/minetunes-banner.png` as the gallery banner and `publish/minetunes-icon.png` if
+   the page asks for a square icon; the jar already carries the 128px version. Gallery shots:
+   `docs/card-left.png`, `docs/card-right.png`, `docs/lyrics.png`, `docs/lyrics-placed.png`.
+6. Upload one file per Minecraft version and tick only that version on it: `minetunes-1.0.0.jar`
+   (1.21.11), `minetunes-1.0.0+26.1.2.jar`, `+26.2`, `+26.3`. They share one project and one page;
+   Modrinth groups them by the game versions you tick.
+7. Each of those four versions has its own file - `version-description-1.21.11.txt`,
+   `version-description-26.1.2.txt`, `-26.2.txt`, `-26.3.txt`. Use its CHANGELOG section for the
+   per-version changelog here, and its DESCRIPTION if you ever split the project by version.

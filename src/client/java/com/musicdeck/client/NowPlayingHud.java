@@ -36,9 +36,20 @@ public final class NowPlayingHud {
 	private static final NowPlaying DEMO = new NowPlaying(true, "Now Playing", "Playing",
 		"Move the panel", "Drag it anywhere", "", 60.0, 180.0, System.currentTimeMillis(), "");
 
+	/**
+	 * The words the move screen has to drag when nothing is playing.
+	 *
+	 * The lyric panel is normally only on screen when a track with words is, which would leave
+	 * the editor with nothing to grab: this stand-in is stamped so its middle line is the one
+	 * the demo card's clock is on, and it is used only while editing.
+	 */
+	private static final Lyrics DEMO_LYRICS = Lyrics.parse("[00:01.00]MineTunes\n"
+		+ "[00:59.00]Drag the words anywhere\n[01:20.00]The corner resizes them");
+
 	private final MediaConfig config;
 	private final MediaBridge bridge;
 	private final AlbumArt art;
+	private final LyricsCache lyrics = new LyricsCache();
 	private int failures;
 	private String trackKey = "";
 	private long changedAt;
@@ -47,6 +58,8 @@ public final class NowPlayingHud {
 	private int pressed = -1;
 	private long pressedAt;
 	private HudLayout.Frame frame = HudLayout.Frame.EMPTY;
+	/** Where the words landed last frame, or null when there were none to draw. */
+	private LyricsLayout.Frame words;
 
 	public NowPlayingHud(MediaConfig config, MediaBridge bridge, AlbumArt art) {
 		this.config = config;
@@ -84,6 +97,11 @@ public final class NowPlayingHud {
 	/** Where the card actually landed last frame, after the editor moved it. */
 	public HudLayout.Frame lastFrame() {
 		return frame;
+	}
+
+	/** Where the words landed last frame, or null when the track had none to draw. */
+	public LyricsLayout.Frame lastLyrics() {
+		return words;
 	}
 
 	/**
@@ -173,8 +191,10 @@ public final class NowPlayingHud {
 		DeckSkin skin = config.deckSkin();
 		int accent = skin.accentOr(Palette.themed(config.theme(), hasArt ? art.accent() : 0, brand));
 		GuiCanvas canvas = new GuiCanvas(graphics, minecraft.font, art);
-		HudLayout.Frame measured = HudLayout.frame(canvas, playing, options(),
-			graphics.guiWidth(), graphics.guiHeight());
+		// One read of the window, shared by the card and the words below it: two reads are
+		// two chances to be measured against a screen the other half was not.
+		int guiWidth = graphics.guiWidth(), guiHeight = graphics.guiHeight();
+		HudLayout.Frame measured = HudLayout.frame(canvas, playing, options(), guiWidth, guiHeight);
 		frame = measured;
 		boolean interactive = overScreen && config.showControls && !editing();
 		hover = interactive ? measured.buttonAt(mouseX, mouseY) : -1;
@@ -185,6 +205,24 @@ public final class NowPlayingHud {
 		HudLayout.Input input = new HudLayout.Input(mode(playing), hover, pressed, interactive, editing());
 		HudLayout.draw(canvas, measured, playing, input, accent, hasArt, flash(),
 			(System.currentTimeMillis() - changedAt) / 1000.0);
+
+		// Read after the track key above has been refreshed, so a file the player saved for
+		// this song is found on the same frame the card learns the song's name. No file and
+		// online lyrics on is one background lookup per track, never a wait on this thread.
+		Lyrics words = lyrics.of(MediaConfig.lyrics(), playing.artist(), playing.title(),
+			config.onlineLyrics, playing.duration());
+		if (!words.present() && editing()) {
+			words = DEMO_LYRICS;
+		}
+
+		this.words = null;
+		if (words.present()) {
+			LyricsLayout.Frame panel = LyricsLayout.frame(canvas, words, playing.position(), measured,
+				lyricsOptions(), guiWidth, guiHeight);
+			this.words = panel;
+			LyricsLayout.draw(canvas, panel, accent, playing.playing(),
+				new LyricsLayout.Style(config.lyricsPanel, config.lyricsOpacity(), editing()));
+		}
 	}
 
 	/** What to paint behind the repeat button: the session's answer, else the last ask. */
@@ -194,6 +232,11 @@ public final class NowPlayingHud {
 
 	private HudLayout.Options options() {
 		return new HudLayout.Options(config.x(), config.y(), config.deckSkin());
+	}
+
+	private LyricsLayout.Options lyricsOptions() {
+		return new LyricsLayout.Options(config.lyricsX(), config.lyricsY(), config.lyricsWidth(),
+			config.lyricsHeight(), config.lyricsLines());
 	}
 
 	/** A canvas that only measures, for the click path where nothing is being drawn. */

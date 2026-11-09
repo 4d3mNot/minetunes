@@ -1,5 +1,6 @@
 package com.musicdeck.client;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -63,6 +64,31 @@ public final class MusicDeckCommand {
 					.executes(context -> style(client, context, StringArgumentType.getString(context, "art")))))
 			.then(ClientCommandManager.literal("restart").executes(context -> restart(client, context)))
 			.then(ClientCommandManager.literal("settings").executes(context -> settings(client, context)))
+			.then(ClientCommandManager.literal("lyrics").executes(context -> lyrics(client, context))
+				.then(ClientCommandManager.literal("on").executes(context -> online(client, context, true)))
+				.then(ClientCommandManager.literal("off").executes(context -> online(client, context, false)))
+				.then(ClientCommandManager.literal("panel").executes(context -> lyricPanel(client, context, !client.config().lyricsPanel))
+					.then(ClientCommandManager.argument("state", StringArgumentType.word())
+						.suggests((context, builder) -> builder.suggest("on").suggest("off").buildFuture())
+						.executes(context -> lyricPanel(client, context,
+							"on".equalsIgnoreCase(StringArgumentType.getString(context, "state"))))))
+				.then(ClientCommandManager.literal("lines")
+					.then(ClientCommandManager.argument("count", IntegerArgumentType.integer(1, LyricsLayout.MAX_LINES))
+						.executes(context -> lyricLines(client, context))))
+				.then(ClientCommandManager.literal("opacity")
+					.then(ClientCommandManager.argument("percent", StringArgumentType.word())
+						.suggests((context, builder) -> builder.suggest(MediaConfig.AUTO)
+							.suggest("85").suggest("100").buildFuture())
+						.executes(context -> lyricOpacity(client, context))))
+				.then(ClientCommandManager.literal("size")
+					.then(ClientCommandManager.argument("width", StringArgumentType.word())
+						.then(ClientCommandManager.argument("height", StringArgumentType.word())
+							.executes(context -> lyricSize(client, context)))))
+				.then(ClientCommandManager.literal("place")
+					.then(ClientCommandManager.argument("x", StringArgumentType.word())
+						.then(ClientCommandManager.argument("y", StringArgumentType.word())
+							.executes(context -> lyricPlace(client, context)))))
+				.then(ClientCommandManager.literal("reset").executes(context -> lyricReset(client, context))))
 			.then(ClientCommandManager.literal("theme").executes(context -> theme(client, context, null))
 				.then(ClientCommandManager.argument("colour", StringArgumentType.word())
 					.suggests((context, builder) -> builder.suggest(Palette.THEME_AUTO)
@@ -187,6 +213,192 @@ public final class MusicDeckCommand {
 	private static int settings(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
 		client.settings(Minecraft.getInstance());
 		return 1;
+	}
+
+	/**
+	 * Say whether the track that is playing has words, and where they come from.
+	 *
+	 * Spotify draws its own lyrics inside its window and hands no part of them to another
+	 * process, so the words come from a file in the folder, or from lrclib.net when there is
+	 * no file and {@link MediaConfig#onlineLyrics} is on. This verb exists because the
+	 * folder starts with one example in it and a panel that silently never appears looks
+	 * like a broken feature.
+	 */
+	private static int lyrics(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		Path folder = MediaConfig.lyrics();
+		boolean online = client.config().onlineLyrics;
+		NowPlaying playing = client.bridge().state();
+		if (!playing.hasTrack()) {
+			source.sendFeedback(Component.literal("Lyrics are .lrc files in " + folder + "."));
+			source.sendFeedback(Component.literal("Name one \"Artist - Title.lrc\" and the card shows it while that track plays."));
+			source.sendFeedback(Component.literal("Online lookup is " + (online ? "on" : "off") + " (/music lyrics on|off)."));
+			return 0;
+		}
+
+		Path file = LyricsLibrary.find(folder, playing.artist(), playing.title());
+		if (file == null) {
+			source.sendFeedback(Component.literal("No lyrics for " + playing.label(60) + "."));
+			source.sendFeedback(Component.literal(online
+				? "Asking lrclib.net; a hit is saved as \"" + LyricsFetcher.fileName(playing.artist(), playing.title())
+					+ "\" in " + folder + "."
+				: "Online lookup is off (/music lyrics on), so save them as \""
+					+ LyricsFetcher.fileName(playing.artist(), playing.title()) + "\" in " + folder + "."));
+			return 0;
+		}
+
+		Lyrics words = LyricsLibrary.read(file);
+		if (!words.present()) {
+			source.sendFeedback(Component.literal(file.getFileName()
+				+ " has no timed lines; every line needs a [mm:ss.xx] stamp."));
+			return 0;
+		}
+
+		int line = words.indexAt(playing.position());
+		source.sendFeedback(Component.literal(words.lines().size() + " lines from " + file.getFileName()
+			+ "; " + (line < 0 ? "before the first line" : "on line " + (line + 1)) + "."));
+		return 1;
+	}
+
+	/** Turn the lrclib.net lookup on or off and keep it. A local file is used either way. */
+	private static int online(MusicDeckClient client, CommandContext<FabricClientCommandSource> context, boolean on) {
+		MediaConfig config = client.config();
+		config.onlineLyrics = on;
+		config.save();
+		context.getSource().sendFeedback(Component.literal(on
+			? "Online lyrics on: a track with no file is looked up on lrclib.net, and the words are saved into the lyrics folder."
+			: "Online lyrics off: only .lrc files in the lyrics folder are used, and no request is made."));
+		return 1;
+	}
+
+	/**
+	 * Give the words their own panel band, or take it away.
+	 *
+	 * With no argument it flips, because the question is always "the other one" - and the
+	 * panel is the one lyric knob that survives the drag screen, so it earns a verb.
+	 */
+	private static int lyricPanel(MusicDeckClient client, CommandContext<FabricClientCommandSource> context, boolean on) {
+		MediaConfig config = client.config();
+		config.lyricsPanel = on;
+		config.save();
+		context.getSource().sendFeedback(Component.literal("Lyrics panel background " + (on ? "on" : "off") + "."));
+		return 1;
+	}
+
+	/** How many rows an automatic height shows. A height set by hand would overrule this, so it is released. */
+	private static int lyricLines(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
+		MediaConfig config = client.config();
+		config.lyricsLines = IntegerArgumentType.getInteger(context, "count");
+		config.lyricsHeight = MediaConfig.AUTO;
+		config.save();
+		context.getSource().sendFeedback(Component.literal("Lyrics show " + config.lyricsLines()
+			+ " lines (height back to auto)."));
+		return 1;
+	}
+
+	/**
+	 * How solid the words' panel is, as a percentage, or {@code auto} for the deck's own alpha.
+	 *
+	 * A number in the file is clamped to the range the layout can paint, but the command says
+	 * so out loud instead of accepting 400% and painting 100.
+	 */
+	private static int lyricOpacity(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
+		MediaConfig config = client.config();
+		String raw = StringArgumentType.getString(context, "percent").trim();
+		if (MediaConfig.AUTO.equalsIgnoreCase(raw)) {
+			config.lyricsOpacity = MediaConfig.AUTO;
+			config.save();
+			context.getSource().sendFeedback(Component.literal(
+				"Lyrics panel opacity follows the deck (auto)."));
+			return 1;
+		}
+
+		Integer percent = lyricPercent(raw);
+		if (percent == null) {
+			context.getSource().sendError(Component.literal(
+				"Opacity takes auto or a percentage from 15 to 100."));
+			return 0;
+		}
+
+		config.lyricsOpacity = Integer.toString(percent);
+		config.save();
+		context.getSource().sendFeedback(Component.literal("Lyrics panel opacity " + percent + "%."));
+		return 1;
+	}
+
+	/** Pin the words' box, or put either axis back to following the card. */
+	private static int lyricSize(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
+		MediaConfig config = client.config();
+		String width = StringArgumentType.getString(context, "width");
+		String height = StringArgumentType.getString(context, "height");
+		Integer pixelsW = lyricPixels(width);
+		Integer pixelsH = lyricPixels(height);
+		if ((pixelsW == null && !isAuto(width)) || (pixelsH == null && !isAuto(height))) {
+			context.getSource().sendError(Component.literal("Size takes auto or a pixel count, e.g. /music lyrics size 220 60."));
+			return 0;
+		}
+
+		config.lyricsWidth = pixelsW == null ? MediaConfig.AUTO : Integer.toString(pixelsW);
+		config.lyricsHeight = pixelsH == null ? MediaConfig.AUTO : Integer.toString(pixelsH);
+		config.save();
+		context.getSource().sendFeedback(Component.literal("Lyrics box "
+			+ (pixelsW == null ? "auto" : pixelsW) + " x " + (pixelsH == null ? "auto" : pixelsH) + "."));
+		return 1;
+	}
+
+	/** Park the words at a point on the GUI, or put either axis back to following the card. */
+	private static int lyricPlace(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
+		MediaConfig config = client.config();
+		String x = StringArgumentType.getString(context, "x");
+		String y = StringArgumentType.getString(context, "y");
+		Integer pixelsX = lyricPixels(x);
+		Integer pixelsY = lyricPixels(y);
+		if ((pixelsX == null && !isAuto(x)) || (pixelsY == null && !isAuto(y))) {
+			context.getSource().sendError(Component.literal("Place takes auto or a pixel position, e.g. /music lyrics place 40 90."));
+			return 0;
+		}
+
+		config.lyricsX = pixelsX == null ? MediaConfig.AUTO : Integer.toString(pixelsX);
+		config.lyricsY = pixelsY == null ? MediaConfig.AUTO : Integer.toString(pixelsY);
+		config.save();
+		context.getSource().sendFeedback(Component.literal("Lyrics at "
+			+ (pixelsX == null ? "auto" : pixelsX) + ", " + (pixelsY == null ? "auto" : pixelsY) + "."));
+		return 1;
+	}
+
+	/** Every lyric setting back to the shipped look: following the card, three lines, deck colours. */
+	private static int lyricReset(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
+		MediaConfig config = client.config();
+		config.lyricsX = MediaConfig.AUTO;
+		config.lyricsY = MediaConfig.AUTO;
+		config.lyricsWidth = MediaConfig.AUTO;
+		config.lyricsHeight = MediaConfig.AUTO;
+		config.lyricsLines = LyricsLayout.LINES;
+		config.lyricsPanel = true;
+		config.lyricsOpacity = MediaConfig.AUTO;
+		config.save();
+		context.getSource().sendFeedback(Component.literal(
+			"Lyrics back to auto: under the card, three lines, the deck's own panel."));
+		return 1;
+	}
+
+	private static boolean isAuto(String raw) {
+		return MediaConfig.AUTO.equalsIgnoreCase(raw.trim());
+	}
+
+	/** A pixel count, or null for anything that is not a non-negative whole number. */
+	private static Integer lyricPixels(String raw) {
+		try {
+			return Math.max(0, Integer.parseInt(raw.trim()));
+		} catch (NumberFormatException e) {
+			return null;
+		}
+	}
+
+	private static Integer lyricPercent(String raw) {
+		String digits = raw.endsWith("%") ? raw.substring(0, raw.length() - 1).trim() : raw;
+		Integer percent = lyricPixels(digits);
+		return percent == null ? null : Math.max(15, Math.min(100, percent));
 	}
 
 	/**

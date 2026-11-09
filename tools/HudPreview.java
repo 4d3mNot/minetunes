@@ -2,6 +2,8 @@ import com.musicdeck.client.DeckLibrary;
 import com.musicdeck.client.DeckSkin;
 import com.musicdeck.client.HudCanvas;
 import com.musicdeck.client.HudLayout;
+import com.musicdeck.client.Lyrics;
+import com.musicdeck.client.LyricsLayout;
 import com.musicdeck.client.NowPlaying;
 import com.musicdeck.client.Palette;
 
@@ -30,7 +32,8 @@ import javax.imageio.ImageIO;
  *
  * Build and run from the project root. Only the game-free classes go on the javac line:
  *   javac -d build-preview tools/HudPreview.java \
- *     src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine}.java
+ *     src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine,\
+ *     Lyrics,LyricsLayout}.java
  *   java -cp build-preview HudPreview build-art/art.png build-art/hud-preview.png
  */
 public final class HudPreview {
@@ -124,6 +127,56 @@ public final class HudPreview {
 		sheet.row("and parked right with a screen open, so the mouse is over next");
 		sheet.cardRight(art, live, accent, true, new HudLayout.Input("", HudLayout.NEXT, -1, true, false));
 
+		// The words, from a file the player supplied: no network, so this panel is only ever
+		// as good as the .lrc beside it - and only ever there when that file was found.
+		Lyrics words = Lyrics.parse("""
+			[ti:Trust]
+			[ar:Brent Faiyaz]
+			[00:00.00]I could tell you how I feel
+			[00:06.50]But I don't know what's real
+			[00:12.00]Trust, and I don't trust
+			[00:18.00]Anyone around me
+			[00:23.00]
+			[00:24.00]So I keep it to myself
+			[00:30.00]And the rest is history
+			""");
+		sheet.skin(DeckSkin.BUILT_IN);
+		sheet.row("a matching .lrc: three lines, the one being sung is the only one lit");
+		sheet.lyricCard(art, live, words, 12.4, accent, true, 0.0);
+		sheet.row("the same song paused: the panel dims with the card, colour unchanged");
+		sheet.lyricCard(art, paused, words, 12.4, accent, true, 0.0);
+		sheet.row("an instrumental gap: its row stays empty instead of repeating the line above");
+		sheet.lyricCard(art, live, words, 23.5, accent, true, 0.0);
+		sheet.row("past the last stamp the window rests on the final three lines");
+		sheet.lyricCard(art, live, words, 40.0, accent, true, 0.0);
+		sheet.row("before the first stamp nothing is lit, but the words are already there");
+		sheet.lyricCard(art, live, words, 0.5, accent, true, 0.0);
+		Lyrics longLine = Lyrics.parse("""
+			[00:00.00]a line short enough to fit the panel
+			[00:05.00]a line far too long for any panel this mod will ever draw, so it has to be cut
+			[00:10.00]and the last one
+			""");
+		sheet.row("a line wider than the widest panel is cut with dots, not drawn over the border");
+		sheet.lyricCard(art, live, longLine, 5.0, accent, true, 0.0);
+		sheet.row("the words of a card parked right sit under the sleeve's own edge");
+		sheet.lyricCardRight(art, live, words, 12.4, accent, true);
+
+		// The words as their own object. These rows are measured with the same layout the
+		// overlay runs, so the picture shows the numbers the move screen writes: a place away
+		// from the card, a width and a height the player dragged, and the custom-UI switches.
+		sheet.row("dragged away from the card and stretched: six rows in a hand-set box, editor marks on");
+		sheet.lyricPlaced(art, live, words, 12.4, accent,
+			new LyricsLayout.Options(280, 120, 240, 75, 3),
+			new LyricsLayout.Style(true, 0.0, true));
+		sheet.row("the same box at 45%: a hand-set alpha that replaces the deck's own");
+		sheet.lyricPlaced(art, live, words, 12.4, accent,
+			new LyricsLayout.Options(280, 120, 240, 75, 3),
+			new LyricsLayout.Style(true, 0.45, false));
+		sheet.row("panel switched off: words only, every row shadowed so a dim neighbour stays readable");
+		sheet.lyricPlaced(art, live, words, 12.4, accent,
+			new LyricsLayout.Options(280, 120, 240, 75, 3),
+			new LyricsLayout.Style(false, 0.0, false));
+
 		File out = new File(args[1]);
 		sheet.write(out);
 		System.out.println("wrote " + out.getAbsolutePath() + " " + sheet.canvas.getWidth() + "x"
@@ -206,7 +259,7 @@ public final class HudPreview {
 	/** One label and one card per row, stacked on a grey page and trimmed to fit. */
 	private static final class Sheet {
 		/** Room for every row; Graphics2D silently drops pixels painted outside the canvas. */
-		private static final int PAGE_HEIGHT = 2400;
+		private static final int PAGE_HEIGHT = 4200;
 		private final McFont font;
 		private final Graphics2D graphics;
 		private final BufferedImage canvas;
@@ -266,6 +319,58 @@ public final class HudPreview {
 			// shifting it again would push the card off the page and paint nothing.
 			HudLayout.draw(new Offset(paper, 0, y), frame, playing, input, accent, hasArt, 0.0, scroll);
 			y += frame.height() + 6;
+		}
+
+		/**
+		 * A card with the lyric panel it would put under itself, drawn as one row.
+		 *
+		 * Both boxes come from the same two layouts the overlay runs, so what this shows is
+		 * the placement rule - below while there is room, and the same edge the card reads
+		 * from - rather than a hand-fitted illustration of it.
+		 */
+		void lyricCard(BufferedImage art, NowPlaying playing, Lyrics words, double seconds, int accent,
+			boolean hasArt, double flash) {
+			Paper paper = new Paper(graphics, font, art);
+			HudLayout.Frame frame = HudLayout.frame(paper, playing, new HudLayout.Options(0, 0, deck),
+				GUI_WIDTH, GUI_HEIGHT);
+			Offset page = new Offset(paper, 6, y);
+			HudLayout.draw(page, frame, playing, HudLayout.Input.INERT, accent, hasArt, flash, 0.0);
+			LyricsLayout.Frame panel = LyricsLayout.frame(paper, words, seconds, frame, GUI_WIDTH, GUI_HEIGHT);
+			LyricsLayout.draw(page, panel, accent, playing.playing());
+			y += panel.y() + panel.height() - frame.y() + 6;
+		}
+
+		/** The same pair parked against the right edge, where the words align to the sleeve. */
+		void lyricCardRight(BufferedImage art, NowPlaying playing, Lyrics words, double seconds, int accent,
+			boolean hasArt) {
+			Paper paper = new Paper(graphics, font, art);
+			HudLayout.Frame frame = HudLayout.frame(paper, playing, new HudLayout.Options(GUI_WIDTH, 0, deck),
+				GUI_WIDTH, GUI_HEIGHT);
+			Offset page = new Offset(paper, 0, y);
+			HudLayout.draw(page, frame, playing, HudLayout.Input.INERT, accent, hasArt, 0.0, 0.0);
+			LyricsLayout.Frame panel = LyricsLayout.frame(paper, words, seconds, frame, GUI_WIDTH, GUI_HEIGHT);
+			LyricsLayout.draw(page, panel, accent, playing.playing());
+			y += panel.y() + panel.height() - frame.y() + 6;
+		}
+
+		/**
+		 * A card with a lyric panel the player placed and sized by hand.
+		 *
+		 * The options carry absolute GUI pixels, so the card is drawn at the same origin and the
+		 * picture shows the distance the numbers really asked for - a panel dragged out from
+		 * under the card, not an illustration of one.
+		 */
+		void lyricPlaced(BufferedImage art, NowPlaying playing, Lyrics words, double seconds, int accent,
+			LyricsLayout.Options options, LyricsLayout.Style style) {
+			Paper paper = new Paper(graphics, font, art);
+			HudLayout.Frame card = HudLayout.frame(paper, playing, new HudLayout.Options(0, 0, deck),
+				GUI_WIDTH, GUI_HEIGHT);
+			Offset page = new Offset(paper, 0, y);
+			HudLayout.draw(page, card, playing, HudLayout.Input.INERT, accent, true, 0.0, 0.0);
+			LyricsLayout.Frame panel = LyricsLayout.frame(paper, words, seconds, card, options,
+				GUI_WIDTH, GUI_HEIGHT);
+			LyricsLayout.draw(page, panel, accent, playing.playing(), style);
+			y += Math.max(card.height(), panel.y() + panel.height()) + 6;
 		}
 
 		void write(File out) throws java.io.IOException {
