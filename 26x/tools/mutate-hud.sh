@@ -30,8 +30,10 @@ LF=src/client/java/com/musicdeck/client/LyricsFetcher.java
 KR=src/client/java/com/musicdeck/client/Karaoke.java
 KL=src/client/java/com/musicdeck/client/KaraokeLayout.java
 KS=src/client/java/com/musicdeck/client/KaraokeScreen.java
+MC=src/client/java/com/musicdeck/client/MediaClock.java
+MB=src/client/java/com/musicdeck/client/MediaBridge.java
 PLATFORMS="26.1.2 26.2 26.3"
-SRC="tools/CheckHud.java $L $P src/client/java/com/musicdeck/client/HudCanvas.java src/client/java/com/musicdeck/client/NowPlaying.java src/client/java/com/musicdeck/client/JsonLine.java $SK $DL $LY $LB $LH $LP $LF $KR $KL"
+SRC="tools/CheckHud.java $L $P src/client/java/com/musicdeck/client/HudCanvas.java src/client/java/com/musicdeck/client/NowPlaying.java src/client/java/com/musicdeck/client/JsonLine.java $SK $DL $LY $LB $LH $LP $LF $KR $KL $MC"
 
 # CheckHud reads the screens and the language file off disk at run time, so a plant in
 # either is live without a recompile - which also means restore() has to put them back.
@@ -67,6 +69,8 @@ restore() {
 	cp build-mut/Karaoke.java "$KR"
 	cp build-mut/KaraokeLayout.java "$KL"
 	cp build-mut/KaraokeScreen.java "$KS"
+	cp build-mut/MediaClock.java "$MC"
+	cp build-mut/MediaBridge.java "$MB"
 	for v in $PLATFORMS; do
 		cp "build-mut/Platform-$v.java" "src/client/versions/$v/java/com/musicdeck/client/Platform.java"
 	done
@@ -99,12 +103,18 @@ cp "$LF" build-mut/LyricsFetcher.java
 cp "$KR" build-mut/Karaoke.java
 cp "$KL" build-mut/KaraokeLayout.java
 cp "$KS" build-mut/KaraokeScreen.java
+cp "$MC" build-mut/MediaClock.java
+cp "$MB" build-mut/MediaBridge.java
 for v in $PLATFORMS; do
 	cp "src/client/versions/$v/java/com/musicdeck/client/Platform.java" "build-mut/Platform-$v.java"
 done
 
 survivors=0
+plants=0
+skip_until=${SKIP_UNTIL:-0}
 plant() { # file, sed-expr, needle-expected-in-output
+	plants=$((plants + 1))
+	if [ "$plants" -le "$skip_until" ]; then return; fi
 	cp "$1" "$1.cur"
 	if ! sed -e "$2" "$1.cur" > "$1.mut"; then
 		echo "SKIP (sed rejected): $3"
@@ -145,6 +155,8 @@ plant() { # file, sed-expr, needle-expected-in-output
 # The icon is bytes, not text: sed cannot plant a defect in it, so the plant is a whole
 # different file dropped onto the same path. Everything else about the run is the same.
 swap() { # file, stand-in, what the gate must name
+	plants=$((plants + 1))
+	if [ "$plants" -le "$skip_until" ]; then return; fi
 	if [ ! -f "$2" ]; then
 		echo "NOT-APPLIED: $3   <-- the stand-in $2 was never built"
 		survivors=$((survivors + 1))
@@ -632,6 +644,20 @@ plant "$G" 's|"key.musicdeck.karaoke": "Karaoke View",||' 'the karaoke key has n
 plant "$G" 's|"musicdeck.karaoke.nowords": .*||' 'a track with no words is explained with a raw key'
 
 echo "=== control run again (files must be back) ==="
+echo "=== plants: the position the source keeps repeating ==="
+plant "$MC" 's|anchor(running, now);|anchor(pos, now);|' 'a repeated position restarts the clock from the old second'
+plant "$MC" 's|boolean moved = pos != lastRaw;|boolean moved = true;|' 'every sample counts as a tick, so a repeat drags the clock back'
+plant "$MC" 's|double next = Math.abs(error) > SNAP_SECONDS|double next = error > -SNAP_SECONDS|' 'a backward seek is absorbed like jitter instead of obeyed'
+plant "$MC" 's|public static final double SNAP_SECONDS = 3.0;|public static final double SNAP_SECONDS = 0.5;|' 'every wobble bigger than half a second is treated as a seek'
+plant "$MC" 's|: Math.max(shown, running + clamp(|: Math.max(0.0, running + clamp(|' 'a correction may move the clock backwards'
+plant "$MC" 's|error \* ABSORB|MAX_STEP|' 'the correction can push the clock past the sample it is correcting'
+plant "$MC" 's@if (!anchored || !key.equals(track)) {@if (!anchored) {@' 'a new track inherits the clock of the one before it'
+plant "$MC" 's|if (!raw.playing()) {|if (false) {|' 'a paused track keeps counting'
+plant "$MC" 's|raw.duration() > 0.0 ? Math.min(position, raw.duration()) : position|position|' 'the clock runs past the end of the track'
+plant "$MB" 's|clock.settle(NowPlaying.from(json))|NowPlaying.from(json)|' 'the bridge hands the raw sample straight to the card'
+plant "$MB" 's|clock.reset();||' 'a dead helper leaves the old anchor behind'
+
+
 javac -encoding UTF-8 -d build-mut $SRC && java -cp build-mut CheckHud | tail -1
 diff -q "$L" build-mut/HudLayout.java && diff -q "$P" build-mut/Palette.java \
 	&& diff -q "$S" build-mut/LayoutScreen.java && diff -q "$N" build-mut/NowPlayingHud.java \
@@ -653,5 +679,8 @@ diff -q "$L" build-mut/HudLayout.java && diff -q "$P" build-mut/Palette.java \
 	&& diff -q "$KR" build-mut/Karaoke.java \
 	&& diff -q "$KL" build-mut/KaraokeLayout.java \
 	&& diff -q "$KS" build-mut/KaraokeScreen.java \
+	&& diff -q "$MC" build-mut/MediaClock.java \
+	&& diff -q "$MB" build-mut/MediaBridge.java \
 	&& echo "sources restored"
+echo "plants run this pass: $((plants - skip_until)) of $plants"
 echo "surviving plants: $survivors"

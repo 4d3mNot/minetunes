@@ -1,6 +1,6 @@
 MINETUNES - PAGE TEXT FOR MINECRAFT 1.21.11
 ===========================================
-File to upload: releases/minetunes-1.2.0.jar
+File to upload: releases/minetunes-1.2.1.jar
 Java 21, Fabric Loader 0.19.2+, Fabric API 0.141.6+1.21.11, Mod Menu optional (17.0.0).
 
 The CHANGELOG section goes in Modrinth's "Changelog" box or CurseForge's "File changelog" field for
@@ -38,7 +38,8 @@ they will not load here.
 Known limits, and they are ceilings in the SMTC contract rather than bugs: there is no volume verb,
 so the mod can seek but cannot change your volume; many players hide shuffle and repeat, so the
 repeat button can come back with no effect; the session follows whoever took it last, so a Chrome
-video can steal it from your music app; position is extrapolated between reports; artwork can lag the
+video can steal it from your music app; position is extrapolated between reports but never runs backwards, because a repeated sample is
+ignored and a wobble is absorbed rather than obeyed; artwork can lag the
 text by up to a second on a track change; lyrics need either a local `.lrc` file or a hit on
 lrclib.net, so an obscure track, a bad title match or an offline machine leaves the panel and the
 karaoke stage empty; and the card's buttons only receive clicks while another screen is open - the
@@ -47,7 +48,18 @@ keybinds and `/music` do not depend on that path.
 
 CHANGELOG  (Modrinth "Changelog" / CurseForge "File changelog")
 ---------
-1.2.0, the karaoke release.
+1.2.1, the clock fix.
+
+- The elapsed time, the progress bar and the karaoke sweep no longer twitch. Spotify repeats a whole
+  second about three times before the next one, and every repeat used to restart the estimate; a
+  repeat is now ignored, so the position only moves forward while the track plays.
+- Small disagreements with a sample are absorbed in steps of at most 0.12s instead of snapping, so
+  the clock reads smoothly.
+- A real seek still lands at once - a jump over three seconds is obeyed, forwards or backwards - a
+  track change resets the anchor, pausing freezes it, and a reconnect cannot leave a stale one behind.
+- Nothing runs past the end of the track.
+
+1.2.0, the karaoke release, is unchanged:
 
 - The line being sung now fills in word by word, in the lyric panel you already have: a dim base row
   with the sung part painted bright over it, cut at the character the voice has reached.

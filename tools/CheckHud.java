@@ -10,6 +10,7 @@ import com.musicdeck.client.LyricsCache;
 import com.musicdeck.client.LyricsFetcher;
 import com.musicdeck.client.LyricsLayout;
 import com.musicdeck.client.LyricsLibrary;
+import com.musicdeck.client.MediaClock;
 import com.musicdeck.client.NowPlaying;
 import com.musicdeck.client.Palette;
 
@@ -31,7 +32,7 @@ import java.util.List;
  *
  *   javac -encoding UTF-8 -d out tools/CheckHud.java \
  *     src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine,DeckSkin,DeckLibrary,
- *     Lyrics,LyricsLibrary,LyricsCache,LyricsLayout,LyricsFetcher,Karaoke,KaraokeLayout}.java
+ *     Lyrics,LyricsLibrary,LyricsCache,LyricsLayout,LyricsFetcher,Karaoke,KaraokeLayout,MediaClock}.java
  *   java -cp out CheckHud
  */
 public final class CheckHud {
@@ -132,6 +133,11 @@ public final class CheckHud {
 		String repeat) {
 		return new NowPlaying(true, "Spotify.exe", status, title, artist, album, pos, end,
 			System.currentTimeMillis(), repeat);
+	}
+
+	/** One bridge sample with a clock of its own, so the delay between polls is what the gate sets. */
+	static NowPlaying sample(String title, String status, double pos, double end, long at) {
+		return new NowPlaying(true, "Spotify.exe", status, title, "A", "B", pos, end, at, "");
 	}
 
 	/** Measure and paint a card the way the game does: one frame, then that frame drawn. */
@@ -465,6 +471,100 @@ public final class CheckHud {
 			"{\"session\":true,\"source\":\"Spotify.exe\",\"status\":\"Playing\",\"title\":\"T\","
 				+ "\"artist\":\"A\",\"album\":\"B\",\"pos\":12.5,\"end\":200.0,\"repeat\":null}"));
 		expect(silent.repeat().isEmpty(), "a null repeat from Spotify reads as unknown, not as a word");
+
+		// --- the clock: a source that repeats its position must not run the card backwards ---
+		// Spotify reports whole seconds and repeats the same one until it ticks, which is
+		// 231.0, 231.0, 231.0, 232.0 at the bridge's three polls a second.
+		MediaClock clock = new MediaClock();
+		NowPlaying c0 = clock.settle(sample("T", "Playing", 231.0, 278.0, 10_000L));
+		NowPlaying c1 = clock.settle(sample("T", "Playing", 231.0, 278.0, 10_300L));
+		NowPlaying c2 = clock.settle(sample("T", "Playing", 231.0, 278.0, 10_600L));
+		expect(c1.reportedPosition() > c0.reportedPosition(),
+			"a repeated position still advances the clock, got " + c0.reportedPosition() + " then "
+				+ c1.reportedPosition());
+		expect(Math.abs(c1.reportedPosition() - 231.3) < 0.02,
+			"and advances it by the time that passed, got " + c1.reportedPosition());
+		expect(c2.reportedPosition() >= c1.reportedPosition(),
+			"the third repeat does not move the clock back, got " + c2.reportedPosition());
+
+		NowPlaying c3 = clock.settle(sample("T", "Playing", 232.0, 278.0, 10_900L));
+		expect(c3.reportedPosition() >= c2.reportedPosition() && c3.reportedPosition() <= 232.0,
+			"the tick lands without jumping back or past the source, got " + c3.reportedPosition());
+		expect(c3.reportedPosition() > 231.8,
+			"and without losing the time between polls, got " + c3.reportedPosition());
+		NowPlaying c4 = clock.settle(sample("T", "Playing", 232.0, 278.0, 11_200L));
+		expect(c4.reportedPosition() > c3.reportedPosition(),
+			"the next repeat advances again, got " + c4.reportedPosition());
+
+		NowPlaying c5 = clock.settle(sample("T", "Playing", 231.6, 278.0, 11_500L));
+		expect(c5.reportedPosition() >= c4.reportedPosition(),
+			"a fresh value half a second behind is absorbed, not obeyed, got " + c5.reportedPosition());
+		expect(c5.reportedPosition() - c4.reportedPosition() < 0.3,
+			"and absorbed gently rather than jumped, got " + (c5.reportedPosition() - c4.reportedPosition()));
+
+		NowPlaying c6 = clock.settle(sample("T", "Playing", 231.1, 278.0, 11_500L));
+		expect(c6.reportedPosition() >= c5.reportedPosition(),
+			"two samples that land in the same millisecond still never move the clock back, got "
+				+ c6.reportedPosition());
+
+		MediaClock seeks = new MediaClock();
+		seeks.settle(sample("T", "Playing", 100.0, 300.0, 20_000L));
+		NowPlaying seekBack = seeks.settle(sample("T", "Playing", 80.0, 300.0, 20_300L));
+		expect(Math.abs(seekBack.reportedPosition() - 80.0) < 0.01,
+			"a jump back past the snap threshold is a seek and is obeyed, got " + seekBack.reportedPosition());
+		NowPlaying forward = seeks.settle(sample("T", "Playing", 120.0, 300.0, 20_600L));
+		expect(Math.abs(forward.reportedPosition() - 120.0) < 0.01,
+			"and so is a jump forward, got " + forward.reportedPosition());
+
+		MediaClock tracks = new MediaClock();
+		tracks.settle(sample("T", "Playing", 250.0, 300.0, 30_000L));
+		NowPlaying other = tracks.settle(sample("U", "Playing", 1.5, 300.0, 30_300L));
+		expect(Math.abs(other.reportedPosition() - 1.5) < 0.01,
+			"a new track starts where it says, however far back that is, got " + other.reportedPosition());
+		MediaClock neighbour = new MediaClock();
+		neighbour.settle(sample("T", "Playing", 250.0, 300.0, 32_000L));
+		NowPlaying next = neighbour.settle(sample("U", "Playing", 249.6, 300.0, 32_300L));
+		expect(Math.abs(next.reportedPosition() - 249.6) < 0.01,
+			"a new track that starts near the old clock still starts at its own position, got "
+				+ next.reportedPosition());
+
+		MediaClock heldClock = new MediaClock();
+		heldClock.settle(sample("T", "Playing", 60.0, 300.0, 40_000L));
+		NowPlaying pausedSample = heldClock.settle(sample("T", "Paused", 60.0, 300.0, 40_300L));
+		NowPlaying pausedAgain = heldClock.settle(sample("T", "Paused", 60.0, 300.0, 45_300L));
+		expect(pausedSample.reportedPosition() == 60.0 && pausedAgain.reportedPosition() == 60.0,
+			"a paused clock does not run, got " + pausedSample.reportedPosition() + " then " + pausedAgain.reportedPosition());
+		NowPlaying resumed = heldClock.settle(sample("T", "Playing", 60.0, 300.0, 45_600L));
+		expect(resumed.reportedPosition() >= 60.0 && resumed.reportedPosition() < 61.0,
+			"and resumes from the paused second, not from the pause's length, got "
+				+ resumed.reportedPosition());
+
+		MediaClock stale = new MediaClock();
+		for (int poll = 0; poll < 6; poll++) {
+			stale.settle(sample("T", "Playing", 50.0, 300.0, 50_000L + poll * 300L));
+		}
+		NowPlaying staleLast = stale.settle(sample("T", "Playing", 50.0, 300.0, 51_800L));
+		expect(staleLast.reportedPosition() > 51.5,
+			"a source that never ticks keeps the clock counting, got " + staleLast.reportedPosition());
+
+		MediaClock capped = new MediaClock();
+		capped.settle(sample("T", "Playing", 277.9, 278.0, 60_000L));
+		NowPlaying end = capped.settle(sample("T", "Playing", 277.9, 278.0, 62_500L));
+		expect(end.reportedPosition() <= 278.0 && end.reportedPosition() >= 277.9,
+			"the clock never runs past the end of the track, got " + end.reportedPosition());
+
+		MediaClock emptyClock = new MediaClock();
+		emptyClock.settle(sample("T", "Playing", 90.0, 300.0, 70_000L));
+		NowPlaying gone = emptyClock.settle(NowPlaying.from(JsonLine.parse("{\"session\":false}")));
+		NowPlaying fresh = emptyClock.settle(sample("T", "Playing", 2.0, 300.0, 70_600L));
+		expect(!gone.session() && Math.abs(fresh.reportedPosition() - 2.0) < 0.01,
+			"a helper that answers with no session clears the anchor, got " + fresh.reportedPosition());
+
+		String bridgeSrc = read(CLIENT_DIR + "MediaBridge.java");
+		expect(bridgeSrc.contains("clock.settle(NowPlaying.from(json))"),
+			"the bridge settles every sample through the clock");
+		expect(bridgeSrc.indexOf("clock.reset();") != bridgeSrc.lastIndexOf("clock.reset();"),
+			"and clears the anchor both when the helper dies and when it is restarted");
 
 		// --- geometry of a normal card ---
 		HudLayout.Frame f = frame(live, 640, 360);

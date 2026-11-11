@@ -51,7 +51,7 @@ the words take the other side, and the clock comes in against the artwork.
 | OS | Windows 10 / 11 (SMTC is a Windows feature) |
 | Network | optional: only the lyrics lookup uses it, and `/music lyrics off` turns that off |
 
-One jar per Minecraft version, matched by file name: `minetunes-1.2.0.jar` is the 1.21.11 build,
+One jar per Minecraft version, matched by file name: `minetunes-1.2.1.jar` is the 1.21.11 build,
 and the 26.x builds end in `+26.1.2`, `+26.2` and `+26.3`. A 26.x jar will not load on 1.21.11 and
 vice versa — that is the point of the suffix.
 
@@ -280,16 +280,17 @@ game, so the whole layout is testable with a bare JDK. Run this from the tree yo
 
 ```
 javac -encoding UTF-8 -d build-gate tools/CheckHud.java \
-  src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine,DeckSkin,DeckLibrary,Lyrics,LyricsLibrary,LyricsCache,LyricsFetcher,LyricsLayout,Karaoke,KaraokeLayout}.java
+  src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,MediaClock,Palette,JsonLine,DeckSkin,DeckLibrary,Lyrics,LyricsLibrary,LyricsCache,LyricsFetcher,LyricsLayout,Karaoke,KaraokeLayout}.java
 java -cp build-gate CheckHud
 ```
 
-715 checks on 1.21.11, 725 checks on 26.x — the extra ten are the per-target checks (nine shims and
+735 checks on 1.21.11, 745 checks on 26.x — the extra ten are the per-target checks (nine shims and
 the 26.x-only paint hook). They cover the geometry, the slide timing, the deck parser's clamps, the
 lyrics parser and matcher, the lookup's URL, escaping and file naming, the cache's
-one-request-per-track rule, the config file, the screens and the language keys, and the karaoke
-clock: word stamps, the estimate, the spread between two stamps, the count-in, the lit prefix and
-the stage's zoom and placement.
+one-request-per-track rule, the config file, the screens and the language keys, the karaoke
+clock (word stamps, the estimate, the spread between two stamps, the count-in, the lit prefix and
+the stage's zoom and placement), and the media clock: repeated samples, jitter, seeks in both
+directions, a pause, a track change, a dead helper and the end of the track.
 
 The mutation suite plants deliberate defects to check that the tests reject broken code:
 
@@ -297,7 +298,7 @@ The mutation suite plants deliberate defects to check that the tests reject brok
 bash tools/mutate-hud.sh
 ```
 
-331 plants on 1.21.11, 340 on 26.x, and the last line must read `surviving plants: 0`. Read the
+342 plants on 1.21.11, 351 on 26.x, and the last line must read `surviving plants: 0`. Read the
 `SKIP` and `NOT-APPLIED` lines too — a plant that never compiled, or an anchor that no longer exists
 in the source, is lost coverage rather than a passing test.
 
@@ -337,7 +338,9 @@ These are ceilings in the SMTC contract, not bugs in the mod:
 - **The session follows whoever took it last.** Starting a video in Chrome can steal it from the
   music app, and the card changes with it.
 - **Position is extrapolated.** Some players only report a new position when the track changes, so
-  the bar estimates between reports and can drift until the next one.
+  the bar estimates between reports and can drift until the next one. The clock no longer runs
+  backwards while it does: a repeated sample is ignored, a wobble is absorbed instead of obeyed, and
+  only a jump larger than three seconds is treated as a seek.
 - **The thumbnail arrives after the title.** Expect the artwork to lag the text by up to a second on
   a track change.
 - **Lyrics can be missing or mistimed.** The media session carries a title, an artist and a

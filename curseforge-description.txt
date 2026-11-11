@@ -5,7 +5,7 @@ no Markdown tables (they render badly there), a 255-char summary, and a changelo
 block because CurseForge asks for one per uploaded file.
 
 
-Written for 1.2.0.
+Written for 1.2.1.
 
 
 SUMMARY  (the "Summary" field - 132 chars on one line, limit is 255)
@@ -117,7 +117,8 @@ These are ceilings in the SMTC contract, not bugs:
 - **The session follows whoever took it last.** Starting a video in Chrome can steal it from your
   music app, and the card changes with it.
 - **Position is extrapolated.** Some players only report a new position on a track change, so the
-  bar estimates in between.
+  bar estimates in between, but never runs backwards: a repeated sample is ignored, wobble is
+  absorbed, and only a jump over three seconds counts as a seek.
 - **Artwork lags text** by up to a second on a track change - the thumbnail arrives after the title.
 - **Lyrics can be missing or mistimed.** The session carries a title, an artist and a position, never
   the words, and Spotify keeps its lyrics inside its own window. The panel reads your `.lrc` files
@@ -131,42 +132,40 @@ These are ceilings in the SMTC contract, not bugs:
   and do not depend on it.
 
 
-CHANGELOG  (the "File changelog" field - the same text goes on every 1.2.0 file)
+CHANGELOG  (the "File changelog" field - the same text goes on every 1.2.1 file)
 ------------------------------------------------------------------------------
-## Sing along: the words fill in, and a stage for them
+## A clock that only goes forward
 
-1.2.0 makes the lyrics keep time with the voice. The line being sung now fills in word by word, and
-`J` opens a full-window karaoke stage built for reading across a room.
+1.2.1 fixes the twitch: the elapsed time on the card, the progress bar under it and the karaoke sweep
+all drew their position from the same number, and that number used to step backwards several times a
+second. Spotify reports a whole second and then repeats it about three times before the next one, and
+each repeat used to restart the estimate, so the clock stuttered and the lyric sweep jumped back with
+it. Song position is now smoothed by its own clock.
 
-### The sweep, in the panel you already have
-- The line being sung is painted dim first and then again, bright, only up to the word the voice has
-  reached - one extra draw call per frame, not a second font.
-- Enhanced `.lrc` files that stamp words `<mm:ss.xx>` fill in exactly when those stamps land.
-- Every other file still sweeps: each line's characters share the time slot evenly, and spaces count
-  half, so the bright edge moves with the syllables rather than racing through the gaps.
-- The sweep never runs past the line's own slot: a fast line rests bright until the next one starts
-  instead of leaking into it, and every line gets at least 0.6 s of reading time.
-- A repeated chorus that carries no stamps uses the same estimate rather than the timings of the
-  first time it was sung.
+### What changed
+- A repeated sample no longer restarts the estimate; it is treated as the same reading it is.
+- Small disagreements between a new sample and the running clock are absorbed in steps of at most
+  0.12 s, so the number moves smoothly instead of snapping.
+- The displayed position can never go backwards while the track is playing, even when two samples
+  arrive in the same millisecond.
+- A real seek still lands at once: a jump larger than three seconds is obeyed immediately, forwards
+  or backwards.
+- Changing track resets the anchor, so a new song never inherits the position of the one before it.
+- Pausing freezes the clock, and resuming continues from where it stopped.
+- The clock is cleared when the helper process dies or is restarted, so a stale anchor cannot survive
+  a reconnect.
+- Nothing runs past the end of the track, and a track with an unknown length is left untouched.
 
-### The karaoke stage
-- `J` (rebindable) or `/music karaoke` opens a full-window view: the line being sung, big and
-  centred, with the next line dimmed underneath.
-- The stage zooms itself: 3x, 2x or 1x, whichever makes the widest of the two lines fit inside the
-  window with its margin.
-- A line that begins after a gap gets a 3-2-1 count-in in the panel's accent colour, above where the
-  line will appear.
-- It is not a pause screen: the song keeps playing and the world keeps moving behind it.
-- `J` or `ESC` closes it, and the HUD card stays off the stage so its buttons cannot take a click
-  meant for the window.
-- Pausing dims the stage the same way it dims the card; the words stay in place.
+### Compatibility
+One jar per Minecraft version: 1.21.11, 26.1.2, 26.2 and 26.3. Fabric Loader 0.19.2+ (0.19.3 on
+26.x), Fabric API, Java 21+ on 1.21.11 and Java 25 on 26.x. Windows 10/11 only, client-side; nothing
+is sent to the Minecraft server.
 
-### Everything else
-- A seventh keybind, **Karaoke View**, default `J`, in the same **MineTunes** Controls category.
-- The stage and the panel read the same lyrics cache, so they can never disagree about which file
-  won.
-- No new network traffic, no new files, no new settings: the view is always there, and a track with
-  no timed words says so in the middle of the stage instead of showing an empty one.
+### Verified
+735 checks pass on 1.21.11 and 745 on the 26.x tree (the extra ten are its per-target checks), with
+342 planted defects on 1.21.11 and 351 on 26.x - every one caught by a named check. The clock has its
+own twenty: a repeated sample, a backward and a forward seek, a pause, a new track, a stale reader,
+the end cap, a helper that dies, and the bridge actually routing every sample through it.
 
 
 HOW TO FILL IN THE CURSEFORGE FORM
@@ -177,7 +176,7 @@ HOW TO FILL IN THE CURSEFORGE FORM
 - License: MIT.
 - Relations: Fabric API = Required dependency. Mod Menu = Optional dependency.
 - Upload the file from `releases/` whose name matches that game version
-  (`minetunes-1.2.0.jar`, `minetunes-1.2.0+26.1.2.jar`, `+26.2`, `+26.3`), release type **Release**,
+  (`minetunes-1.2.1.jar`, `minetunes-1.2.1+26.1.2.jar`, `+26.2`, `+26.3`), release type **Release**,
   and paste the changelog above. Each is a separate file entry; do not tick several game versions on
   one file. Upload the `.jar` files only - the `.zip` and `.rar` beside them are bundles, not mod
   files. The .jar already carries the 128px icon, so CurseForge's own icon upload is only for the

@@ -114,7 +114,8 @@ These are ceilings in the SMTC contract, not bugs:
 - **The session follows whoever took it last.** Starting a video in Chrome can steal it from your
   music app, and the card changes with it.
 - **Position is extrapolated.** Some players only report a new position on a track change, so the bar
-  estimates in between.
+  estimates in between, but never runs backwards: a repeated sample is ignored, wobble is absorbed,
+  and only a jump over three seconds counts as a seek.
 - **Artwork lags text** by up to a second on a track change - the thumbnail arrives after the title.
 - **Lyrics can be missing or mistimed.** The session carries a title, an artist and a position, never
   the words, and Spotify keeps its lyrics inside its own window. The panel reads your `.lrc` files
@@ -143,8 +144,8 @@ BEFORE YOU SAVE THE PAGE
    the page asks for a square icon; the jar already carries the 128px version. Gallery shots:
    `docs/card-left.png`, `docs/card-right.png`, `docs/lyrics.png`, `docs/lyrics-placed.png`,
    `docs/karaoke.png`.
-7. Upload one file per Minecraft version and tick only that version on it: `minetunes-1.2.0.jar`
-   (1.21.11), `minetunes-1.2.0+26.1.2.jar`, `+26.2`, `+26.3`. They share one project and one page;
+7. Upload one file per Minecraft version and tick only that version on it: `minetunes-1.2.1.jar`
+   (1.21.11), `minetunes-1.2.1+26.1.2.jar`, `+26.2`, `+26.3`. They share one project and one page;
    Modrinth groups them by the game versions you tick.
 8. Upload the `.jar` files only. The `releases/` folder also holds `.zip` and `.rar` packages; do not
    attach those to a version or to "Additional files" - that slot is for source jars, not bundles.

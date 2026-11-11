@@ -37,6 +37,7 @@ public final class MediaBridge {
 	private final Path artFile;
 	private final Object lifecycle = new Object();
 	private final AtomicLong sequence = new AtomicLong();
+	private final MediaClock clock = new MediaClock();
 
 	private volatile NowPlaying state = NowPlaying.EMPTY;
 	private volatile long stateAt;
@@ -160,6 +161,7 @@ public final class MediaBridge {
 		}
 
 		pruneCommands();
+		clock.reset();
 		stopping = false;
 		unavailable = false;
 		retries = 0;
@@ -262,6 +264,7 @@ public final class MediaBridge {
 
 	private void fail(String why) {
 		unavailable = true;
+		clock.reset();
 		state = NowPlaying.EMPTY;
 		stateAt = 0L;
 		lastAck = why + "; media control disabled until /deck restart";
@@ -276,7 +279,7 @@ public final class MediaBridge {
 		JsonLine json = JsonLine.parse(line);
 		switch (json.string("t", "")) {
 			case "state" -> {
-				state = NowPlaying.from(json);
+				state = clock.settle(NowPlaying.from(json));
 				stateAt = System.currentTimeMillis();
 			}
 			case "ack" -> {
