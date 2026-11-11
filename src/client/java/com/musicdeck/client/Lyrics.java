@@ -18,8 +18,33 @@ import java.util.List;
 public record Lyrics(List<Line> lines) {
 	public static final Lyrics EMPTY = new Lyrics(List.of());
 
+	/**
+	 * One word of an enhanced file, timed relative to its line.
+	 *
+	 * Enhanced LRC stamps every word with its own {@code <mm:ss.xx>}, which is the only way
+	 * to know when a syllable lands rather than when its line does. The stamp is stored as
+	 * an offset from the line's own start, so the file's {@code [offset:]} tag and a line
+	 * written twice for a chorus move the words with their line instead of away from it.
+	 *
+	 * {@code start} is an index into the line's folded text; the word ends where the next
+	 * one begins, so the two always tile the line without gaps.
+	 */
+	public record Word(double after, int start) {
+	}
+
 	/** A lyric and the second it starts. Empty text is a timed gap, not a mistake. */
-	public record Line(double at, String text) {
+	public record Line(double at, String text, List<Word> words) {
+		public Line(double at, String text) {
+			this(at, text, List.of());
+		}
+
+		public Line {
+			words = List.copyOf(words);
+		}
+
+		public boolean timed() {
+			return !words.isEmpty();
+		}
 	}
 
 	public Lyrics {
@@ -99,9 +124,13 @@ public record Lyrics(List<Line> lines) {
 				continue;
 			}
 
-			String words = plain(line.substring(at));
+			Line body = withWords(stamps.get(0), line.substring(at));
 			for (double seconds : stamps) {
-				timed.add(new Line(seconds, words));
+				// Word stamps describe the first time this line is sung. A chorus that repeats
+				// the same words later gets no stamps, so it fills from the character estimate
+				// rather than from times that all landed before it began.
+				timed.add(new Line(seconds, body.text(),
+					seconds == stamps.get(0) ? body.words() : List.of()));
 			}
 		}
 
@@ -113,7 +142,7 @@ public record Lyrics(List<Line> lines) {
 		// sit at the bottom and still move the lines written above it.
 		List<Line> shifted = new ArrayList<>(timed.size());
 		for (Line line : timed) {
-			shifted.add(new Line(Math.max(0.0, line.at() - offset), line.text()));
+			shifted.add(new Line(Math.max(0.0, line.at() - offset), line.text(), line.words()));
 		}
 
 		shifted.sort(Comparator.comparingDouble(Line::at));
@@ -174,27 +203,87 @@ public record Lyrics(List<Line> lines) {
 	}
 
 	/**
-	 * The words as the game's font can draw them.
+	 * The words as the game's font can draw them, keeping any word stamps as timings.
 	 *
 	 * Lyrics are pasted from the web, so they arrive with the curly quotes, en dashes and
 	 * ellipses that a word processor writes. Minecraft's default font has a glyph for the
 	 * ASCII forms and not always for these, and a missing glyph is a hole in the middle of
-	 * the line rather than a character, so they are folded here once.
+	 * the line rather than a character, so they are folded here once - and the fold is
+	 * tracked, because the word offsets are positions in the folded text, not the raw one.
 	 *
-	 * Enhanced LRC marks every word with its own {@code <mm:ss.xx>} stamp. The panel paints
-	 * whole lines, so those stamps are spacing, not words: leaving them in draws the timing
-	 * across the screen.
+	 * A {@code <mm:ss.xx>} tag is a word boundary; anything else between angle brackets is
+	 * text somebody typed, and is kept.
 	 */
-	static String plain(String text) {
-		return text
-			.replaceAll("<\\d{1,3}:\\d{1,2}(?:\\.\\d{1,3})?>", " ")
-			.replaceAll("[\\t ]+", " ")
-			.replace('\u2018', '\'').replace('\u2019', '\'')
-			.replace('\u201A', '\'').replace('\u201B', '\'')
-			.replace('\u201C', '"').replace('\u201D', '"').replace('\u201E', '"')
-			.replace("\u2026", "...")
-			.replace('\u2013', '-').replace('\u2014', '-')
-			.replace('\u00A0', ' ')
-			.trim();
+	static Line withWords(double at, String body) {
+		List<Double> marks = new ArrayList<>(1);
+		List<Integer> starts = new ArrayList<>(1);
+		StringBuilder raw = new StringBuilder(body.length());
+		int cursor = 0;
+		while (cursor < body.length()) {
+			int open = body.indexOf('<', cursor);
+			if (open < 0) {
+				break;
+			}
+
+			int close = body.indexOf('>', open + 1);
+			if (close < 0) {
+				break;
+			}
+
+			Double stamp = time(body.substring(open + 1, close));
+			if (stamp == null) {
+				raw.append(body, cursor, open + 1);
+				cursor = open + 1;
+				continue;
+			}
+
+			raw.append(body, cursor, open);
+			marks.add(stamp - at);
+			starts.add(raw.length());
+			cursor = close + 1;
+		}
+
+		raw.append(body, cursor, body.length());
+
+		StringBuilder text = new StringBuilder(raw.length());
+		int[] map = new int[raw.length() + 1];
+		for (int index = 0; index < raw.length(); index++) {
+			map[index] = text.length();
+			char c = raw.charAt(index);
+			if (c == ' ' || c == '\t' || c == '\u00A0') {
+				if (text.length() > 0 && text.charAt(text.length() - 1) != ' ') {
+					text.append(' ');
+				}
+
+				continue;
+			}
+
+			String folded = fold(c);
+			text.append(folded == null ? String.valueOf(c) : folded);
+		}
+
+		map[raw.length()] = text.length();
+		while (text.length() > 0 && text.charAt(text.length() - 1) == ' ') {
+			text.setLength(text.length() - 1);
+		}
+
+		List<Word> words = new ArrayList<>(marks.size());
+		for (int index = 0; index < marks.size(); index++) {
+			words.add(new Word(Math.max(0.0, marks.get(index)),
+				Math.min(map[starts.get(index)], text.length())));
+		}
+
+		return new Line(at, text.toString(), words);
+	}
+
+	/** The ASCII stand-ins for the punctuation a word processor writes, or null to keep it. */
+	private static String fold(char c) {
+		return switch (c) {
+			case '\u2018', '\u2019', '\u201A', '\u201B' -> "'";
+			case '\u201C', '\u201D', '\u201E' -> "\"";
+			case '\u2026' -> "...";
+			case '\u2013', '\u2014' -> "-";
+			default -> null;
+		};
 	}
 }

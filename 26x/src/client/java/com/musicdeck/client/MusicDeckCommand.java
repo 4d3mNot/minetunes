@@ -64,6 +64,7 @@ public final class MusicDeckCommand {
 					.executes(context -> style(client, context, StringArgumentType.getString(context, "art")))))
 			.then(ClientCommands.literal("restart").executes(context -> restart(client, context)))
 			.then(ClientCommands.literal("settings").executes(context -> settings(client, context)))
+			.then(ClientCommands.literal("karaoke").executes(context -> karaoke(client, context)))
 			.then(ClientCommands.literal("lyrics").executes(context -> lyrics(client, context))
 				.then(ClientCommands.literal("on").executes(context -> online(client, context, true)))
 				.then(ClientCommands.literal("off").executes(context -> online(client, context, false)))
@@ -212,6 +213,12 @@ public final class MusicDeckCommand {
 
 	private static int settings(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
 		client.settings(Minecraft.getInstance());
+		return 1;
+	}
+
+	/** Open the same view the karaoke key opens, for players who would rather type it. */
+	private static int karaoke(MusicDeckClient client, CommandContext<FabricClientCommandSource> context) {
+		client.karaoke(Minecraft.getInstance());
 		return 1;
 	}
 

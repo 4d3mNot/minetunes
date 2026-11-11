@@ -30,7 +30,7 @@ shows.
 - Drag the card anywhere on screen. Park it past the middle and it mirrors to face that corner.
 - The buttons answer clicks while another screen is open - inventory, chat, Mod Menu - so you can skip
   a track without closing what you were looking at.
-- Six keybinds in their own **MineTunes** category, rebindable in vanilla Controls or the mod's own
+- Seven keybinds in their own **MineTunes** category, rebindable in vanilla Controls or the mod's own
   settings screen.
 - **Decks**: community-made looks in a plain JSON file. No code, no rebuild, and a dropped-in file
   shows up the next time you open the picker.
@@ -40,6 +40,10 @@ shows.
   first; a track with no file is looked up once on lrclib.net and the answer is saved in that
   folder, so the next play works offline. `/music lyrics off` turns the lookup off and the mod then
   makes no request at all.
+- **Karaoke**: the line being sung fills in word by word - exactly from an enhanced `.lrc` that
+  stamps its words, by an even per-character estimate otherwise - and `J` opens a full-window stage
+  with the current line big and centred, the next one dimmed below it, and a 3-2-1 count-in when a
+  line starts after a gap. The song keeps playing while it is open.
 
 ### Commands
 
@@ -65,6 +69,7 @@ shows.
 /music lyrics size <w> <h>         the box in GUI pixels, or auto
 /music lyrics place <x> <y>        where the box sits, or auto
 /music lyrics reset                back to under the card, three rows, the deck's own alpha
+/music karaoke                     the full-window karaoke stage
 /music settings                    the settings screen
 /music restart                     re-launch the media helper
 ```
@@ -82,9 +87,20 @@ Client-side only. It registers no URL handler, needs no admin rights, and other 
 Under the hood it launches Windows' own PowerShell as a helper process, which asks the local Windows
 media-session API what is playing and writes the answer to `<game dir>/musicdeck/`. Its only network
 traffic is the lyrics lookup: when a track has no local file and online lyrics is on, it sends an
-HTTPS GET to lrclib.net carrying the artist, the title and the track's length, and saves the answer
-in the lyrics folder. Nothing else leaves the machine, there is no telemetry, and `/music lyrics
-off` stops the lookup entirely. No registry changes, no elevation.
+HTTPS GET to lrclib.net carrying the artist, the title and the track's length, plus a `User-Agent`
+header naming the mod and version (`MineTunes/1.2.0`), and saves the answer in the lyrics folder.
+As with any web request, lrclib sees the IP address it came from. Nothing else leaves the machine,
+there is no telemetry, and `/music lyrics off` stops the lookup entirely. No registry changes, no
+elevation.
+
+### Licence and disclosure
+
+MIT licence. MineTunes is an unofficial client mod, not affiliated with, endorsed by or sponsored by
+Spotify, YouTube, Microsoft, Mojang or the Minecraft brand; those names only describe what the mod
+reads and controls. Contains AI-generated content: the code, the documentation and this page were
+written with the help of generative AI and then reviewed, tested and adjusted by the author. The
+album sleeve in the screenshots is the track's real cover, read live from the media session; no
+artwork is generated or shipped with the mod.
 
 ### Known limits
 
@@ -119,14 +135,19 @@ BEFORE YOU SAVE THE PAGE
    media session (PowerShell helper) and, when a track has no local lyrics file, sends an HTTPS GET
    to lrclib.net with the artist, title and track length. No telemetry; `/music lyrics off` disables
    the request."
-4. The source link was left out because the GitHub repo has not been created or pushed yet. Add it
-   once it exists.
-5. Upload `publish/minetunes-banner.png` as the gallery banner and `publish/minetunes-icon.png` if
+4. Set the licence to **MIT** and the source link to `https://github.com/4d3mNot/minetunes`.
+5. Tick the **"Contains AI-generated content"** content disclosure: the mod's code, its docs and this
+   page were produced with generative AI assistance. Rule 6.1 requires the tick, not just the line in
+   the description.
+6. Upload `publish/minetunes-banner.png` as the gallery banner and `publish/minetunes-icon.png` if
    the page asks for a square icon; the jar already carries the 128px version. Gallery shots:
-   `docs/card-left.png`, `docs/card-right.png`, `docs/lyrics.png`, `docs/lyrics-placed.png`.
-6. Upload one file per Minecraft version and tick only that version on it: `minetunes-1.1.0.jar`
-   (1.21.11), `minetunes-1.1.0+26.1.2.jar`, `+26.2`, `+26.3`. They share one project and one page;
+   `docs/card-left.png`, `docs/card-right.png`, `docs/lyrics.png`, `docs/lyrics-placed.png`,
+   `docs/karaoke.png`.
+7. Upload one file per Minecraft version and tick only that version on it: `minetunes-1.2.0.jar`
+   (1.21.11), `minetunes-1.2.0+26.1.2.jar`, `+26.2`, `+26.3`. They share one project and one page;
    Modrinth groups them by the game versions you tick.
-7. Each of those four versions has its own file - `version-description-1.21.11.txt`,
+8. Upload the `.jar` files only. The `releases/` folder also holds `.zip` and `.rar` packages; do not
+   attach those to a version or to "Additional files" - that slot is for source jars, not bundles.
+9. Each of those four versions has its own file - `version-description-1.21.11.txt`,
    `version-description-26.1.2.txt`, `-26.2.txt`, `-26.3.txt`. Use its CHANGELOG section for the
    per-version changelog here, and its DESCRIPTION if you ever split the project by version.

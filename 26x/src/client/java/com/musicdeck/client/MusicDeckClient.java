@@ -46,6 +46,7 @@ public class MusicDeckClient implements ClientModInitializer {
 	private KeyMapping hudKey;
 	private KeyMapping moveKey;
 	private KeyMapping settingsKey;
+	private KeyMapping karaokeKey;
 
 	private int ticks;
 	private String pendingAck;
@@ -74,7 +75,7 @@ public class MusicDeckClient implements ClientModInitializer {
 	 * if a binding is ever added: it reads as a missing row instead of a wrong one.
 	 */
 	public KeyMapping[] keyBinds() {
-		return new KeyMapping[] {toggleKey, nextKey, previousKey, hudKey, moveKey, settingsKey};
+		return new KeyMapping[] {toggleKey, nextKey, previousKey, hudKey, moveKey, settingsKey, karaokeKey};
 	}
 
 	public boolean enabled() {
@@ -94,6 +95,12 @@ public class MusicDeckClient implements ClientModInitializer {
 		// or clicked from inside the inventory without the screen API letting it keep the
 		// mouse. Every screen gets the same two hooks: draw on top, and answer first.
 		ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) -> {
+			if (screen instanceof KaraokeScreen) {
+				// The karaoke view owns the window and the mouse: a card over it would sit on
+				// the words, and its buttons would take clicks meant for the screen.
+				return;
+			}
+
 			if (!(screen instanceof LayoutScreen)) {
 				ScreenEvents.afterExtract(screen).register((ignored, graphics, mouseX, mouseY, delta) ->
 					hud.renderOverScreen(graphics, mouseX, mouseY));
@@ -114,6 +121,8 @@ public class MusicDeckClient implements ClientModInitializer {
 			"key.musicdeck.move", InputConstants.KEY_U, CATEGORY));
 		settingsKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 			"key.musicdeck.settings", InputConstants.KEY_EQUALS, CATEGORY));
+		karaokeKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+			"key.musicdeck.karaoke", InputConstants.KEY_J, CATEGORY));
 
 		MusicDeckCommand.register(this);
 		ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
@@ -159,6 +168,10 @@ public class MusicDeckClient implements ClientModInitializer {
 			settings(minecraft);
 		}
 
+		while (karaokeKey.consumeClick()) {
+			karaoke(minecraft);
+		}
+
 		if (pendingAck != null) {
 			if (++pendingAt >= ACK_DELAY_TICKS) {
 				tell(minecraft, bridge.lastAck().isEmpty() ? pendingAck + " sent" : bridge.lastAck());
@@ -192,6 +205,16 @@ public class MusicDeckClient implements ClientModInitializer {
 	 */
 	public void settings(Minecraft minecraft) {
 		Platform.open(minecraft, new SettingsScreen(config, Platform.screen(minecraft)));
+	}
+
+	/**
+	 * Open the karaoke view.
+	 *
+	 * No world check: the words are as singable from the title screen as from a cave, and the
+	 * screen does not pause whatever is behind it.
+	 */
+	public void karaoke(Minecraft minecraft) {
+		Platform.open(minecraft, new KaraokeScreen(hud, bridge));
 	}
 
 	private void send(String command, String friendly) {

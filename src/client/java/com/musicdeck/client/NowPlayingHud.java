@@ -105,6 +105,31 @@ public final class NowPlayingHud {
 	}
 
 	/**
+	 * The words for this track, from the same cache the panel uses.
+	 *
+	 * The karaoke screen reads them here rather than opening its own cache: two caches would
+	 * mean two lookups for one song, and the panel and the stage could disagree about which
+	 * file won.
+	 */
+	public Lyrics wordsFor(NowPlaying playing) {
+		return lyrics.of(MediaConfig.lyrics(), playing.artist(), playing.title(),
+			config.onlineLyrics, playing.duration());
+	}
+
+	/** The colour this track is painted in, so a second surface cannot pick a different one. */
+	public int accent(NowPlaying playing) {
+		return accent(playing, art.ready(Minecraft.getInstance(), config.artStyle()));
+	}
+
+	private int accent(NowPlaying playing, boolean hasArt) {
+		int brand = playing.spotify() ? Palette.GREEN : Palette.GREY;
+		// A deck that names its own colour is asking for that colour on every track, so it is
+		// settled before the cover gets a say; the theme only decides what it did not pin.
+		DeckSkin skin = config.deckSkin();
+		return skin.accentOr(Palette.themed(config.theme(), hasArt ? art.accent() : 0, brand));
+	}
+
+	/**
 	 * Take a click that landed on a button. True means the screen behind must not also
 	 * see it, so only a real hit on a real control is ever consumed.
 	 */
@@ -185,11 +210,7 @@ public final class NowPlayingHud {
 		}
 
 		boolean hasArt = art.ready(minecraft, config.artStyle());
-		int brand = playing.spotify() ? Palette.GREEN : Palette.GREY;
-		// A deck that names its own colour is asking for that colour on every track, so it is
-		// settled before the cover gets a say; the theme only decides what it did not pin.
-		DeckSkin skin = config.deckSkin();
-		int accent = skin.accentOr(Palette.themed(config.theme(), hasArt ? art.accent() : 0, brand));
+		int accent = accent(playing, hasArt);
 		GuiCanvas canvas = new GuiCanvas(graphics, minecraft.font, art);
 		// One read of the window, shared by the card and the words below it: two reads are
 		// two chances to be measured against a screen the other half was not.

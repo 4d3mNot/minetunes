@@ -30,13 +30,16 @@ the words take the other side, and the clock comes in against the artwork.
 - The four buttons answer clicks while another screen is open — inventory, chat, Mod Menu — so you
   can skip a track without closing what you were looking at. With nothing open there is no mouse
   target, so use the keys or `/music`. (See [known limits](#known-limits) on this one.)
-- Six keybinds in their own **MineTunes** category, rebindable from the mod's own settings screen.
+- Seven keybinds in their own **MineTunes** category, rebindable from the mod's own settings screen.
 - **Decks**: community-made looks in a JSON file, no code and no rebuild.
 - **Lyrics**: the line being sung, in a panel of its own. It starts under the card but is a box
   like the card: drag it anywhere, stretch it, and give it its own look — band on or off, its own
   opacity, one to nine rows. A `.lrc` you save is always used first; a track with no file is looked
   up once on [lrclib.net](https://lrclib.net) and the answer is kept in the folder, so the next play
   is a local read. `/music lyrics off` stops the lookup.
+- **Karaoke**: the words fill in as they are sung, letter by letter, in the panel and on a stage of
+  its own — press `J` for one big line, the next one under it, and a 3-2-1 count-in when a line
+  follows a gap.
 
 ## Requirements
 
@@ -48,7 +51,7 @@ the words take the other side, and the clock comes in against the artwork.
 | OS | Windows 10 / 11 (SMTC is a Windows feature) |
 | Network | optional: only the lyrics lookup uses it, and `/music lyrics off` turns that off |
 
-One jar per Minecraft version, matched by file name: `minetunes-1.1.0.jar` is the 1.21.11 build,
+One jar per Minecraft version, matched by file name: `minetunes-1.2.0.jar` is the 1.21.11 build,
 and the 26.x builds end in `+26.1.2`, `+26.2` and `+26.3`. A 26.x jar will not load on 1.21.11 and
 vice versa — that is the point of the suffix.
 
@@ -77,8 +80,9 @@ that **profile's** `mods` folder, not the global one.
 | `K` | Toggle the panel |
 | `U` | Open the move screen (drag the card or the words, `Shift`+arrows resize) |
 | `=` | Open MineTunes settings |
+| `J` | Open the karaoke stage (`J` or `ESC` closes it) |
 
-All six are rebindable, in vanilla's Controls screen under the **MineTunes** category or in the
+All seven are rebindable, in vanilla's Controls screen under the **MineTunes** category or in the
 mod's own settings.
 
 ## Commands
@@ -105,6 +109,7 @@ mod's own settings.
 /music lyrics size <w> <h>         the box in GUI pixels, or auto
 /music lyrics place <x> <y>        where the box sits, or auto
 /music lyrics reset                back to under the card, three rows, the deck's own alpha
+/music karaoke                     the big stage (`J` opens and closes it too)
 /music settings                    the settings screen
 /music restart                     re-launch the media helper
 ```
@@ -158,9 +163,9 @@ ignored, so a deck written for a newer version still draws.
 
 Save a lyrics file in `config/musicdeck/lyrics/` and the card picks it up the moment the track
 starts. The panel is never narrower than the card and grows for a long line, three lines tall, under
-the card (or above it when the card is parked at the bottom): the line being sung is white and its
-neighbours are dimmed, so the eye has somewhere to go. When the card mirrors to the right half of the
-screen, the panel mirrors with it.
+the card (or above it when the card is parked at the bottom): the line being sung is white and fills
+as the voice reaches each letter, and its neighbours are dimmed, so the eye has somewhere to go.
+When the card mirrors to the right half of the screen, the panel mirrors with it.
 
 ![The lyric panel under the card](docs/lyrics.png)
 
@@ -209,9 +214,35 @@ tells you which file it picked, or names the file a lookup would save.
 if a chorus comes back. A timed line with no words is an instrumental gap and the panel leaves that
 row empty. `[offset:±ms]` is honoured wherever it sits in the file, positive meaning the words
 appear earlier. `[ti:]`, `[ar:]`, `[al:]` and the like are ignored. Enhanced files that stamp every
-word with `<mm:ss.xx>` are read too — the per-word stamps are dropped, because the panel paints
-whole lines. UTF-8 and Windows-1252 both read; a file that cannot be parsed shows nothing rather
-than an error.
+word with `<mm:ss.xx>` are read too, and those stamps are used: each word lights on its own beat
+instead of being spread evenly. A file without them still fills, weighted by how much is actually
+sung — a letter takes twice the time of a space. UTF-8 and Windows-1252 both read; a file that
+cannot be parsed shows nothing rather than an error.
+
+## Karaoke
+
+The sweep is always on: whatever is playing, the current lyric row lights a character at a time.
+There is nothing to switch on and no scoring — it is a view for singing along, not a game that
+judges you.
+
+![The karaoke stage mid-line](docs/karaoke.png)
+
+Press `J` (or type `/music karaoke`) for the stage: one line across the middle of the window, the
+next line under it, the track's name at the top and the way out at the bottom. The stage picks the
+largest whole-number zoom that still fits the longest line with a margin, so a short line is big and
+a long one steps down a size rather than running off the screen. A line that follows a long gap
+counts you in — 3, 2, 1 — right before it starts. A paused track stops filling; the words stay lit
+to the point the voice stopped at.
+
+The stage does not pause the world and leaves the song playing, which is why it is a screen of its
+own rather than another overlay: `J` or `ESC` closes it and you are back where you were, with the
+music still going and the card waiting.
+
+**Timing.** With word stamps the fill is exact. Without them the line is spread across its own
+length: each letter is one unit, a space half of one, and the line runs for 0.9 seconds plus 0.16 a
+letter — never less than 0.6 seconds, and never the whole silence before the next line, or a long
+intro would leave one word glowing while you wait. A chorus written once and repeated has no word
+stamps the second time, and is estimated there.
 
 ## Building
 
@@ -249,14 +280,16 @@ game, so the whole layout is testable with a bare JDK. Run this from the tree yo
 
 ```
 javac -encoding UTF-8 -d build-gate tools/CheckHud.java \
-  src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine,DeckSkin,DeckLibrary,Lyrics,LyricsLibrary,LyricsCache,LyricsFetcher,LyricsLayout}.java
+  src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine,DeckSkin,DeckLibrary,Lyrics,LyricsLibrary,LyricsCache,LyricsFetcher,LyricsLayout,Karaoke,KaraokeLayout}.java
 java -cp build-gate CheckHud
 ```
 
-658 checks on 1.21.11, 667 checks on 26.x — the extra nine are the per-target shim checks. They
-cover the geometry, the slide timing, the deck parser's clamps, the lyrics parser and matcher, the
-lookup's URL, escaping and file naming, the cache's one-request-per-track rule, the config file, the
-screens and the language keys.
+715 checks on 1.21.11, 725 checks on 26.x — the extra ten are the per-target checks (nine shims and
+the 26.x-only paint hook). They cover the geometry, the slide timing, the deck parser's clamps, the
+lyrics parser and matcher, the lookup's URL, escaping and file naming, the cache's
+one-request-per-track rule, the config file, the screens and the language keys, and the karaoke
+clock: word stamps, the estimate, the spread between two stamps, the count-in, the lit prefix and
+the stage's zoom and placement.
 
 The mutation suite plants deliberate defects to check that the tests reject broken code:
 
@@ -264,7 +297,7 @@ The mutation suite plants deliberate defects to check that the tests reject brok
 bash tools/mutate-hud.sh
 ```
 
-288 plants on 1.21.11, 297 on 26.x, and the last line must read `surviving plants: 0`. Read the
+331 plants on 1.21.11, 340 on 26.x, and the last line must read `surviving plants: 0`. Read the
 `SKIP` and `NOT-APPLIED` lines too — a plant that never compiled, or an anchor that no longer exists
 in the source, is lost coverage rather than a passing test.
 

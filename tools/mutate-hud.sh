@@ -27,7 +27,10 @@ LH=src/client/java/com/musicdeck/client/LyricsCache.java
 LP=src/client/java/com/musicdeck/client/LyricsLayout.java
 CM=src/client/java/com/musicdeck/client/MusicDeckCommand.java
 LF=src/client/java/com/musicdeck/client/LyricsFetcher.java
-SRC="tools/CheckHud.java $L $P src/client/java/com/musicdeck/client/HudCanvas.java src/client/java/com/musicdeck/client/NowPlaying.java src/client/java/com/musicdeck/client/JsonLine.java $SK $DL $LY $LB $LH $LP $LF"
+KR=src/client/java/com/musicdeck/client/Karaoke.java
+KL=src/client/java/com/musicdeck/client/KaraokeLayout.java
+KS=src/client/java/com/musicdeck/client/KaraokeScreen.java
+SRC="tools/CheckHud.java $L $P src/client/java/com/musicdeck/client/HudCanvas.java src/client/java/com/musicdeck/client/NowPlaying.java src/client/java/com/musicdeck/client/JsonLine.java $SK $DL $LY $LB $LH $LP $LF $KR $KL"
 
 # CheckHud reads the screens and the language file off disk at run time, so a plant in
 # either is live without a recompile - which also means restore() has to put them back.
@@ -60,6 +63,9 @@ restore() {
 	cp build-mut/LyricsLayout.java "$LP"
 	cp build-mut/MusicDeckCommand.java "$CM"
 	cp build-mut/LyricsFetcher.java "$LF"
+	cp build-mut/Karaoke.java "$KR"
+	cp build-mut/KaraokeLayout.java "$KL"
+	cp build-mut/KaraokeScreen.java "$KS"
 }
 mkdir -p build-mut
 cp "$L" build-mut/HudLayout.java
@@ -86,6 +92,9 @@ cp "$LH" build-mut/LyricsCache.java
 cp "$LP" build-mut/LyricsLayout.java
 cp "$CM" build-mut/MusicDeckCommand.java
 cp "$LF" build-mut/LyricsFetcher.java
+cp "$KR" build-mut/Karaoke.java
+cp "$KL" build-mut/KaraokeLayout.java
+cp "$KS" build-mut/KaraokeScreen.java
 
 survivors=0
 plant() { # file, sed-expr, needle-expected-in-output
@@ -425,14 +434,14 @@ echo "=== plants: the lyric file and its words ==="
 # The parser is the one place a player's own file is read, and every mistake here is silent:
 # a wrong fraction, a dropped offset or an unsorted list all draw plausible words at the
 # wrong moment. Each plant names one of those silences.
-plant "$LY" 's|timed.add(new Line(seconds, words));|timed.add(new Line(Math.max(0.0, seconds - offset), words));|; s|shifted.add(new Line(Math.max(0.0, line.at() - offset), line.text()));|shifted.add(new Line(line.at(), line.text()));|' 'an offset written at the bottom no longer covers the lines above it'
+plant "$LY" 's|shifted.add(new Line(Math.max(0.0, line.at() - offset), line.text(), line.words()));|shifted.add(new Line(line.at(), line.text(), line.words()));|' 'an offset written at the bottom no longer covers the lines above it'
 plant "$LY" 's|return fraction.isEmpty() ? value : value + Double.parseDouble("0." + fraction);|return fraction.isEmpty() ? value : value + Integer.parseInt(fraction) / 100.0;|' 'the fraction is read as hundredths whatever its length, so .5 is five hundredths'
 plant "$LY" 's|text = text.substring(1);|text = text;|' 'a byte-order mark is left on the first line, so that line is thrown away'
 plant "$LY" 's|shifted.sort(Comparator.comparingDouble(Line::at));||' 'the lines stay in file order, so a file written out of order rewinds the song'
 plant "$LY" 's|stamps.add(seconds);|stamps.clear(); stamps.add(seconds);|' 'a chorus written with two stamps is only sung the second time'
-plant "$LY" 's|timed.add(new Line(seconds, words));|if (!words.isEmpty()) timed.add(new Line(seconds, words));|' 'a timed gap is dropped, so the previous line stands through the instrumental'
+plant "$LY" 's|Line body = withWords(stamps.get(0), line.substring(at));|Line body = withWords(stamps.get(0), line.substring(at)); if (body.text().isEmpty()) { continue; }|' 'a timed gap is dropped, so the previous line stands through the instrumental'
 plant "$LY" 's|lines.get(index).at() <= seconds|lines.get(index).at() < seconds|' 'a line does not start on its own stamp, so every line lands a frame late'
-plant "$LY" 's|replace("\\u2026", "...")|replace("\\u2026", ".")|' 'the ellipsis a lyric site writes is halved in the middle of a line'
+plant "$LY" 's|-> "\.\.\.";|-> ".";|' 'the ellipsis a lyric site writes is halved in the middle of a line'
 
 echo "=== plants: finding the file for the song ==="
 # A .lrc is somebody's own file in a folder of their own files, so the matcher has to be
@@ -493,8 +502,8 @@ plant "$LP" 's|if (style.opacity() > 0.0) {|if (false) {|' 'an opacity set by ha
 plant "$LP" 's|Math.max(MIN_OPACITY, style.opacity())|style.opacity()|' 'a faint opacity can make the words disappear'
 plant "$LP" 's|if (style.editing()) {|if (false) {|' 'the move screen paints no grip for the words'
 plant "$LP" 's|if (style.editing()) {|if (true) {|' 'every ordinary panel shows the editor'"'"'s grip and outline'
-plant "$LP" 's%singing || !style.panel()%singing%' 'a dim neighbour on a panel with no band is drawn with no shadow'
-plant "$LP" 's%singing || !style.panel()%true%' 'every row on a panel takes the sung line'"'"'s shadow'
+plant "$LP" 's|canvas.text(text, textX, textY, otherInk, !style.panel());|canvas.text(text, textX, textY, otherInk, false);|' 'a dim neighbour on a panel with no band is drawn with no shadow'
+plant "$LP" 's|canvas.text(text, textX, textY, otherInk, !style.panel());|canvas.text(text, textX, textY, otherInk, true);|' 'every row on a panel takes the sung line'"'"'s shadow'
 plant "$LP" 's|int band = skin.panel();|int band = DeckSkin.BUILT_IN.panel();|' 'the words ignore the deck the card is wearing'
 
 echo "=== plants: the placement editor ==="
@@ -547,12 +556,60 @@ plant "$LH" 's|asked = track;|asked = "";|' 'the same track is asked for again o
 plant "$LH" 's|if (!online) {|if (!online) { fetched = Lyrics.EMPTY;|' 'turning the switch off drops words that already arrived'
 plant "$LH" 's|if (!track.equals(asked)) {|if (false) {|' 'a new track keeps the last one'"'"'s words'
 plant "$LH" 's|} catch (CompletionException e) {|} catch (CompletionException e) { if (e != null) return Lyrics.parse("[00:01.00]x");|' 'a failed lookup paints an invented line instead of nothing'
-plant "$LY" 's|"<|"$|' 'the word stamps are left in the line, so the timing is drawn across the screen'
+plant "$LY" 's|if (stamp == null) {|if (true) {|' 'a word stamp is kept in the line, so the timing is drawn across the screen and the words never fill'
 plant "$LY" 's|.trim();|.replaceAll("<[^>]*>", " ").trim();|' 'anything in angle brackets is eaten, so a line about "<3" loses its words'
 plant "$N" 's|config.onlineLyrics, playing.duration());|true, playing.duration());|' 'the card ignores the online switch and always asks'
 plant "$N" 's|LyricsLayout.draw(canvas, panel, accent, playing.playing(),|LyricsLayout.draw(canvas, panel, accent, playing.playing() \|\| LyricsFetcher.HOST.isEmpty(),|' 'the draw path reaches for the fetcher itself instead of asking the cache'
 plant "$CM" 's|online(client, context, false)|online(client, context, true)|' 'the command has no way to turn the lookup off'
 plant "$V" 's|props.setProperty("onlineLyrics"|props.setProperty("onlineLyric"|' 'the online switch is written under a name that is never read back'
+
+echo "=== plants: the karaoke clock and its stage ==="
+# The sweep is arithmetic over the player's own file, so every mistake here is a plausible
+# fill at the wrong moment. The word offsets, the estimate, the spread between two stamps
+# and the count-in each get a plant that moves the fill without breaking the draw.
+plant "$LY" 's|marks.add(stamp - at);|marks.add(stamp);|' 'a word stamp is kept as an absolute second, so a shifted line fills on the wrong beat'
+plant "$LY" 's|seconds == stamps.get(0) ? body.words() : List.of()|body.words()|' 'a chorus written once and repeated reuses word beats that all landed before it'
+plant "$LY" 's|map\[index\] = text.length();|map[index] = index;|' 'a word offset is a position in the raw line, so folded punctuation shifts every word after it'
+plant "$KR" 's|return start + Math.min(gap, Math.max(MIN_SPAN, estimate));|return start + Math.max(gap, estimate);|' 'a line before a long silence fills across the whole silence'
+plant "$KR" 's|if (gap < MIN_SPAN) {|if (false) {|' 'two lines stamped on top of each other leave the first one unsung'
+plant "$KR" 's|PER_CHARACTER = 0.16|PER_CHARACTER = 0.30|' 'the fill runs past its line and sits finished while the words go on'
+plant "$KR" 's|if (text.charAt(index) != '"'"' '"'"') {|if (true) {|' 'a space is counted as sung, so a spaced line fills slower than a packed one'
+plant "$KR" 's|times\[index\] = start + (stop - start) \* ((index - from) / (double) (to - from));|times[index] = start;|' 'every letter between two stamps lights with the first of them'
+plant "$KR" 's|return Math.min(last, low + Math.max(0.0, part));|return low;|' 'the fill jumps a whole letter instead of cutting through it'
+plant "$KR" 's|(int) Math.ceil(fraction - 1e-6)|(int) Math.floor(fraction)|' 'a letter waits to be finished before it lights'
+plant "$KR" 's|edge += (int) Math.round(canvas.textWidth(text.substring(whole, whole + 1)) \* part);|edge += 0;|' 'the bright copy stops at the start of the letter being sung'
+plant "$KR" 's|COUNT_IN = 3|COUNT_IN = 4|' 'the count-in starts a second too early'
+plant "$KL" 's|for (int candidate = MAX_SCALE; candidate > 1; candidate--) {|for (int candidate = 2; candidate > 1; candidate--) {|' 'the words are never drawn bigger than double'
+plant "$KL" 's|MAX_SCALE = 3;|MAX_SCALE = 4;|' 'the stage zooms past the size that still fits a line'
+plant "$KL" 's|if (widest \* candidate + MARGIN \* 2 <= width) {|if (widest * candidate <= width) {|' 'a line that fits the screen ends up touching both walls'
+plant "$KL" 's|int logical = Math.max(1, width / zoom);|int logical = Math.max(1, width);|' 'the stage is centred in screen pixels while it is drawn three times as large'
+plant "$KL" 's|int currentY = Math.max(0, (height \* 44 / 100) / zoom);|int currentY = Math.max(0, height / 2 / zoom);|' 'the sung line sits dead centre, on top of the count-in'
+plant "$KL" 's|return Math.max(MARGIN, (room - canvas.textWidth(text)) / 2);|return Math.max(MARGIN, room - canvas.textWidth(text));|' 'the words are pinned to the right wall instead of centred'
+plant "$KL" 's|int index = lyrics.indexAt(seconds);|int index = Math.max(0, lyrics.indexAt(seconds));|' 'before the first stamp the stage sings the first line early'
+plant "$KL" 's|String current = LyricsLayout.fit(canvas, line.text(), room);|String current = line.text();|' 'a line too wide for the stage runs over the screen edge'
+plant "$KL" 's|next, centred(canvas, next, logical), currentY + LyricsLayout.LINE + NEXT_GAP,|next, centred(canvas, next, logical), currentY + LyricsLayout.LINE,|' 'the preview touches the line being sung'
+plant "$KL" 's|canvas.text(text, stage.currentX(), stage.currentY(), dim, true);|canvas.text(text, stage.currentX(), stage.currentY(), ink, true);|' 'the whole sung line is lit before the voice reaches it'
+plant "$KL" 's|canvas.text(glyph, x, stage.currentY(), ink, true);|canvas.text(glyph, stage.currentX(), stage.currentY(), ink, true);|' 'every lit letter is drawn at the start of the line, in a heap'
+plant "$KL" 's|int lit = Karaoke.bright(stage.fraction(), text.length());|int lit = text.length();|' 'the line is lit whole the moment it starts'
+plant "$KL" 's|int ink = live ? Palette.WHITE : Palette.scale(Palette.WHITE, HudLayout.PAUSED);|int ink = Palette.WHITE;|' 'a paused track is painted as though the voice were still on it'
+plant "$KL" 's|stage.countdownX(), stage.countdownY(),|stage.countdownX(), stage.currentY(),|' 'the count-in is drawn on top of the words'
+plant "$KL" 's|canvas.text(header, centred(canvas, header, width), HEADER_Y, accent, true);|canvas.text(header, 0, HEADER_Y, accent, true);|' 'the track name hangs off the left edge'
+plant "$KL" 's|int y = Math.max(0, height - HINT_Y - LyricsLayout.LINE);|int y = Math.max(0, height - HINT_Y);|' 'the way out runs off the bottom edge'
+plant "$KL" 's|int y = Math.max(0, (height - LyricsLayout.LINE) / 2);|int y = Math.max(0, height / 2);|' 'the message is centred on its top edge rather than its middle'
+plant "$KL" 's|canvas.fill(0, 0, width, height, Palette.withAlpha(WASH, 190));|canvas.fill(0, 0, width / 2, height, Palette.withAlpha(WASH, 190));|' 'the wash covers half the window'
+plant "$KS" 's|return false;|return true;|' 'opening the karaoke view pauses the world, which stops the song it is about'
+plant "$KS" 's|event.key() == InputConstants.KEY_J|event.key() == InputConstants.KEY_K|' 'the key that opened the view does not close it'
+plant "$KS" 's|super.render(graphics, mouseX, mouseY, delta);|this.renderBackground(graphics, mouseX, mouseY, delta);|' 'the karaoke view asks for a second blur and takes the client down'
+plant "$KS" 's|Lyrics words = hud.wordsFor(playing);|Lyrics words = Lyrics.EMPTY;|' 'the view never asks the cache that already has the words'
+plant "$KS" 's|graphics.pose().scale(stage.scale(), stage.scale());|graphics.pose().scale(1, 1);|' 'the stage is measured for a zoom it is then drawn without'
+plant "$C" 's|if (screen instanceof KaraokeScreen) {|if (false) {|' 'the card and its buttons sit on top of the karaoke words'
+plant "$C" 's|settingsKey, karaokeKey};|settingsKey};|' 'the karaoke key is bound but never listed, so it cannot be changed'
+plant "$C" 's|InputConstants.KEY_J|InputConstants.KEY_K|' 'the karaoke key is bound to a letter nobody would press for it'
+plant "$C" 's|while (karaokeKey.consumeClick()) {|while (false) {|' 'the key is registered and never polled'
+plant "$CM" 's|literal("karaoke")|literal("sing")|' 'the command cannot open the view the key opens'
+plant "$N" 's|public Lyrics wordsFor(|private Lyrics wordsFor(|' 'the view has no way to ask the card for the words it already loaded'
+plant "$G" 's|"key.musicdeck.karaoke": "Karaoke View",||' 'the karaoke key has no label in the language file'
+plant "$G" 's|"musicdeck.karaoke.nowords": .*||' 'a track with no words is explained with a raw key'
 
 echo "=== control run again (files must be back) ==="
 javac -encoding UTF-8 -d build-mut $SRC && java -cp build-mut CheckHud | tail -1
@@ -573,5 +630,8 @@ diff -q "$L" build-mut/HudLayout.java && diff -q "$P" build-mut/Palette.java \
 	&& diff -q "$LP" build-mut/LyricsLayout.java \
 	&& diff -q "$CM" build-mut/MusicDeckCommand.java \
 	&& diff -q "$LF" build-mut/LyricsFetcher.java \
+	&& diff -q "$KR" build-mut/Karaoke.java \
+	&& diff -q "$KL" build-mut/KaraokeLayout.java \
+	&& diff -q "$KS" build-mut/KaraokeScreen.java \
 	&& echo "sources restored"
 echo "surviving plants: $survivors"

@@ -1,6 +1,6 @@
 MINETUNES - PAGE TEXT FOR MINECRAFT 26.2
 ========================================
-File to upload: releases/minetunes-1.1.0+26.2.jar
+File to upload: releases/minetunes-1.2.0+26.2.jar
 Java 25, Fabric Loader 0.19.3+, Fabric API 0.161.0+26.2, Mod Menu optional (20.0.3).
 
 The CHANGELOG section goes in Modrinth's "Changelog" box or CurseForge's "File changelog" field for
@@ -24,11 +24,12 @@ This is the 26.2 build. It needs Fabric Loader 0.19.3 or newer, Fabric API 0.161
 
 Same mod as the other builds on this page: card, transport buttons, album art with the accent colour
 picked off the cover, sliding text, drag-anywhere placement that mirrors to face the corner it is
-parked in, six rebindable keybinds, `/music` commands, JSON decks in `config/musicdeck/decks/`, and
-synced lyrics in a panel of their own that can be dragged anywhere and stretched to any size:
-your own `.lrc` files are read first, and a track with none is looked up once on
-lrclib.net with the answer saved to the folder. Windows 10 or 11 only, client-side, with the
-lookup as the mod's only network traffic; nothing is sent to the Minecraft server.
+parked in, seven rebindable keybinds, `/music` commands, JSON decks in `config/musicdeck/decks/`,
+synced lyrics in a panel of their own that can be dragged anywhere and stretched to any size, and
+karaoke: the line being sung fills in word by word, and `J` opens a full-window stage with one big
+line and a 3-2-1 count-in. Lyrics come from your own `.lrc` files first, and a track with none is
+looked up once on lrclib.net with the answer saved to the folder. Windows 10 or 11 only, client-side,
+with the lookup as the mod's only network traffic; nothing is sent to the Minecraft server.
 
 26.2 moved the game's screen access from `Minecraft.screen` to the `Gui` object. That is the only
 thing this build does differently from the 26.1.2 one, and it is why the two jars are not
@@ -39,29 +40,29 @@ so the mod can seek but cannot change your volume; many players hide shuffle and
 repeat button can come back with no effect; the session follows whoever took it last, so a Chrome
 video can steal it from your music app; position is extrapolated between reports; artwork can lag the
 text by up to a second on a track change; lyrics need either a local `.lrc` file or a hit on
-lrclib.net, so an obscure track, a bad title match or an offline machine leaves the panel empty;
-and the card's buttons only receive clicks while another screen is open - the keybinds and `/music`
-do not depend on that path.
+lrclib.net, so an obscure track, a bad title match or an offline machine leaves the panel and the
+karaoke stage empty; and the card's buttons only receive clicks while another screen is open - the
+keybinds and `/music` do not depend on that path.
 
 
 CHANGELOG  (Modrinth "Changelog" / CurseForge "File changelog")
 ---------
-First release for Minecraft 26.2, the same feature set as the 26.1.2 build.
+1.2.0, the karaoke release, for Minecraft 26.2.
 
-- Now-playing card on the HUD: album sleeve, title, artist, album, elapsed time, progress bar and
-  four transport buttons.
-- Play / pause, previous, next, seek, shuffle and repeat over the Windows SMTC session.
-- Album art from the session with the panel accent picked off the cover.
-- Slide-to-read text, drag-anywhere placement with a mirrored card, clickable transport buttons
-  while another screen is open.
-- Six rebindable keybinds, a settings screen and a Mod Menu entry.
-- Community decks: JSON files in `config/musicdeck/decks/`, three examples seeded.
-- Synced lyrics: your own `.lrc` files are used first, and a track with none is looked up once on
-  lrclib.net and saved into the lyrics folder, so the next play works offline.
-- The lyric panel is a box of its own: drag the words anywhere in the move screen (`U`), stretch
-  them sideways, downwards or both with the corner grip (or `Shift`+arrows), and set its band,
-  opacity and row count on the new **Lyrics...** page in settings, or with
-  `/music lyrics panel|lines|opacity|size|place|reset`.
-- Commands `/music` and `/minetunes`.
+- The line being sung now fills in word by word, in the lyric panel you already have: a dim base row
+  with the sung part painted bright over it, cut at the character the voice has reached.
+- Exact fills from enhanced `.lrc` files that stamp words `<mm:ss.xx>`; every other file sweeps on an
+  even per-character estimate, with spaces counting half.
+- A line's sweep stays inside its own slot and always gets at least 0.6s of reading time, so a fast
+  line rests bright instead of leaking into the next one.
+- New karaoke stage (`J`, rebindable, or `/music karaoke`): the current line big and centred, the next
+  one dimmed underneath, a 3-2-1 count-in in the accent colour before a line that follows a gap, and
+  automatic 3x/2x/1x zoom so the widest line fits.
+- The stage does not pause the game; `J` or `ESC` closes it, and the HUD card stays off it.
+- A seventh keybind, **Karaoke View**, in the MineTunes Controls category.
+- Everything from 1.1.0 is still here: the card and its transport buttons, album art with the accent
+  picked off the cover, slide-to-read text, drag-anywhere placement with a mirrored card, community
+  decks via `config/musicdeck/decks/`, synced lyrics from local `.lrc` files or lrclib.net, a
+  placeable and resizable lyric panel, and the `/music` and `/minetunes` commands.
 - Updated for 26.2's screen API (`Minecraft.gui.screen()` / `gui.setScreen`); built against Fabric
   API 0.161.0 and Mod Menu 20.0.3.

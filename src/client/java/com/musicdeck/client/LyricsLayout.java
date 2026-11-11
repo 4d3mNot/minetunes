@@ -68,7 +68,7 @@ public final class LyricsLayout {
 	 * first line, when there is nothing to highlight yet.
 	 */
 	public record Frame(int x, int y, int width, int height, int rows, int first, int current, DeckSkin skin,
-		Lyrics lyrics) {
+		Lyrics lyrics, double seconds) {
 		/** Rows are centred in the box, so an over-tall panel does not leave all its slack at the bottom. */
 		public int lineY(int row) {
 			int block = rows * LINE + (rows - 1) * LINE_GAP;
@@ -151,7 +151,7 @@ public final class LyricsLayout {
 
 		int current = lyrics.indexAt(seconds);
 		int first = current < 0 ? 0 : Math.max(0, Math.min(current - rows / 2, lyrics.lines().size() - rows));
-		return new Frame(x, y, width, height, rows, first, current, card.skin(), lyrics);
+		return new Frame(x, y, width, height, rows, first, current, card.skin(), lyrics, seconds);
 	}
 
 	/**
@@ -238,7 +238,24 @@ public final class LyricsLayout {
 
 			boolean singing = index == frame.current();
 			int textX = frame.x() + (frame.width() - canvas.textWidth(text)) / 2;
-			canvas.text(text, textX, frame.lineY(row), singing ? currentInk : otherInk, singing || !style.panel());
+			int textY = frame.lineY(row);
+			if (!singing) {
+				canvas.text(text, textX, textY, otherInk, !style.panel());
+				continue;
+			}
+
+			// The row is painted twice: dim underneath, then the part the voice has reached
+			// bright inside a scissor that ends at the current character. That is one clip and
+			// no second font, so the sweep costs a single extra draw call per frame.
+			canvas.text(text, textX, textY, otherInk, true);
+			double fraction = Karaoke.fraction(Karaoke.times(line, Karaoke.end(frame.lyrics(), index)),
+				frame.seconds());
+			int stop = Karaoke.edge(canvas, text, Math.min(fraction, text.length()), textX);
+			if (stop > textX) {
+				canvas.clip(textX - 1, textY - 1, stop, textY + LINE + 1);
+				canvas.text(text, textX, textY, currentInk, true);
+				canvas.unclip();
+			}
 		}
 
 		if (style.editing()) {

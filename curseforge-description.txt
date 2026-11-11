@@ -5,6 +5,9 @@ no Markdown tables (they render badly there), a 255-char summary, and a changelo
 block because CurseForge asks for one per uploaded file.
 
 
+Written for 1.2.0.
+
+
 SUMMARY  (the "Summary" field - 132 chars on one line, limit is 255)
 --------------------------------------------------------
 A now-playing card on your HUD that controls whatever Windows is already playing -
@@ -41,14 +44,19 @@ button in the mod list when it is installed.
 - Drag the card anywhere on screen. Park it past the middle and it mirrors to face that corner.
 - The buttons answer clicks while another screen is open - inventory, chat, Mod Menu - so you can
   skip a track without closing what you were looking at.
-- Six keybinds in their own **MineTunes** category, rebindable in vanilla Controls or the mod's own
+- Seven keybinds in their own **MineTunes** category, rebindable in vanilla Controls or the mod's own
   settings screen.
 - **Decks**: community-made looks in a plain JSON file. No code, no rebuild, and a dropped-in file
   shows up the next time you open the picker.
-- **Lyrics**: the card shows the line being sung, in a small panel under it. A `.lrc` you save in
+- **Lyrics**: the line being sung, in a panel that is a box of its own - drag it anywhere, stretch
+  it sideways or downwards, and give it its own band, opacity and row count. A `.lrc` you save in
   `config/musicdeck/lyrics/` is always used first; a track with no file is looked up once on
   lrclib.net and the answer is saved in that folder, so the next play works offline. `/music lyrics
   off` turns the lookup off and the mod then makes no request at all.
+- **Karaoke**: the line being sung fills in a character at a time, in the panel or on a stage of its
+  own. `J` opens the stage: one big centred line, the next one dimmed under it, and a 3-2-1 count-in
+  before a line that follows a gap. Enhanced `.lrc` files that stamp every word fill in exactly on
+  those stamps; every other file still sweeps. No scoring, no microphone, nothing to set up.
 
 **Commands**
 
@@ -59,25 +67,34 @@ button in the mod list when it is installed.
 /music play | pause | toggle
 /music next | prev
 /music seek <seconds>
-/music shuffle [on|off]
+/music shuffle [on|off]            repeat shuffle if the player hides the verb
 /music repeat [none|track|playlist]
 /music hud [x y]                   show, hide, or place the card
 /music move                        the drag screen
 /music style [smooth|pixel]        how the album art is scaled
 /music theme [auto|green|white]    panel colour
 /music deck [name]                 which deck to draw with
-/music lyrics                      whether the playing track has words, and where they go
+/music lyrics                      whether the playing track has words, and which file answered
 /music lyrics on | off             turn the lrclib.net lookup on or off
+/music lyrics panel [on|off]       the band behind the words
+/music lyrics lines <1-9>          how many rows the panel shows
+/music lyrics opacity <auto|%>     band alpha; auto follows the deck
+/music lyrics size <w> <h>         the box in GUI pixels, or auto
+/music lyrics place <x> <y>        where the box sits, or auto
+/music lyrics reset                back to under the card, three rows, the deck's own alpha
+/music karaoke                     the big stage (`J` opens and closes it too)
 /music settings                    the settings screen
 /music restart                     re-launch the media helper
 ```
 
 **Files it writes**
 
-- `<game dir>/musicdeck.properties` - position, deck, theme, art style, visibility, the `onlineLyrics` switch
+- `<game dir>/musicdeck.properties` - position, deck, theme, art style, visibility, the `onlineLyrics`
+  switch, and the lyric box (`lyricsX/Y/Width/Height/Lines/Panel/Opacity`)
 - `<game dir>/config/musicdeck/decks/` - your decks; three examples are seeded on first run
 - `<game dir>/config/musicdeck/lyrics/` - your `.lrc` files and every lyric the lookup found; one
   example is seeded on first run
+- `<game dir>/spotify.properties` - legacy settings, read only while `musicdeck.properties` is missing
 
 Client-side only. It registers no URL handler, needs no admin rights, and other players see nothing.
 
@@ -106,29 +123,50 @@ These are ceilings in the SMTC contract, not bugs:
   the words, and Spotify keeps its lyrics inside its own window. The panel reads your `.lrc` files
   first and only then asks lrclib.net, so an obscure track, an offline machine or a switched-off
   lookup leaves a track with no panel. Timings come from whoever wrote the file, so a live take or a
-  remaster can drift from the audio.
+  remaster can drift from the audio. The karaoke stage and the sweep read the same timings, so they
+  drift with them; a track with no timed words says so in the middle of the stage rather than
+  showing an empty one.
 - **Click-through is the least proven part.** The card is drawn on the HUD, so its buttons only
   receive a click when another screen is open. The keybinds and `/music` go through the same verbs
   and do not depend on it.
 
 
-CHANGELOG  (the "File changelog" field - the same text goes on every 1.1.0 file)
+CHANGELOG  (the "File changelog" field - the same text goes on every 1.2.0 file)
 ------------------------------------------------------------------------------
-First release.
+## Sing along: the words fill in, and a stage for them
 
-- Now-playing card on the HUD: album sleeve, title, artist, album, elapsed time, progress bar and
-  four transport buttons.
-- Play / pause, previous, next, seek, shuffle and repeat over the Windows SMTC session.
-- Album art from the session with the panel accent picked off the cover; smooth and pixelated
-  scaling.
-- Slide-to-read text instead of truncation.
-- Drag-anywhere placement; the card mirrors to face whichever side it is parked on.
-- Transport buttons clickable while another screen is open.
-- Six rebindable keybinds in their own MineTunes category, plus a settings screen and Mod Menu entry.
-- Community decks: JSON files in `config/musicdeck/decks/`, three examples seeded.
-- Synced lyrics: your own `.lrc` files first, with a one-time lrclib.net lookup for tracks that have
-  none, saved into the lyrics folder so the next play works offline.
-- Commands `/music` and `/minetunes`.
+1.2.0 makes the lyrics keep time with the voice. The line being sung now fills in word by word, and
+`J` opens a full-window karaoke stage built for reading across a room.
+
+### The sweep, in the panel you already have
+- The line being sung is painted dim first and then again, bright, only up to the word the voice has
+  reached - one extra draw call per frame, not a second font.
+- Enhanced `.lrc` files that stamp words `<mm:ss.xx>` fill in exactly when those stamps land.
+- Every other file still sweeps: each line's characters share the time slot evenly, and spaces count
+  half, so the bright edge moves with the syllables rather than racing through the gaps.
+- The sweep never runs past the line's own slot: a fast line rests bright until the next one starts
+  instead of leaking into it, and every line gets at least 0.6 s of reading time.
+- A repeated chorus that carries no stamps uses the same estimate rather than the timings of the
+  first time it was sung.
+
+### The karaoke stage
+- `J` (rebindable) or `/music karaoke` opens a full-window view: the line being sung, big and
+  centred, with the next line dimmed underneath.
+- The stage zooms itself: 3x, 2x or 1x, whichever makes the widest of the two lines fit inside the
+  window with its margin.
+- A line that begins after a gap gets a 3-2-1 count-in in the panel's accent colour, above where the
+  line will appear.
+- It is not a pause screen: the song keeps playing and the world keeps moving behind it.
+- `J` or `ESC` closes it, and the HUD card stays off the stage so its buttons cannot take a click
+  meant for the window.
+- Pausing dims the stage the same way it dims the card; the words stay in place.
+
+### Everything else
+- A seventh keybind, **Karaoke View**, default `J`, in the same **MineTunes** Controls category.
+- The stage and the panel read the same lyrics cache, so they can never disagree about which file
+  won.
+- No new network traffic, no new files, no new settings: the view is always there, and a track with
+  no timed words says so in the middle of the stage instead of showing an empty one.
 
 
 HOW TO FILL IN THE CURSEFORGE FORM
@@ -139,13 +177,15 @@ HOW TO FILL IN THE CURSEFORGE FORM
 - License: MIT.
 - Relations: Fabric API = Required dependency. Mod Menu = Optional dependency.
 - Upload the file from `releases/` whose name matches that game version
-  (`minetunes-1.1.0.jar`, `minetunes-1.1.0+26.1.2.jar`, `+26.2`, `+26.3`), release type **Release**,
+  (`minetunes-1.2.0.jar`, `minetunes-1.2.0+26.1.2.jar`, `+26.2`, `+26.3`), release type **Release**,
   and paste the changelog above. Each is a separate file entry; do not tick several game versions on
-  one file. The .jar already carries the 128px icon, so CurseForge's own icon upload is only for the
+  one file. Upload the `.jar` files only - the `.zip` and `.rar` beside them are bundles, not mod
+  files. The .jar already carries the 128px icon, so CurseForge's own icon upload is only for the
   project page.
 - Logo: `publish/minetunes-icon.png`. Screenshots: `docs/card-left.png`, `docs/card-right.png`
-  (the same card parked on opposite sides) and `docs/lyrics.png` (the lyric panel).
+  (the same card parked on opposite sides), `docs/lyrics.png`, `docs/lyrics-placed.png` (the lyric
+  box dragged away from the card) and `docs/karaoke.png` (the karaoke stage mid-line).
 - `version-description-1.21.11.txt`, `-26.1.2.txt`, `-26.2.txt`, `-26.3.txt` are one file per
   version: the CHANGELOG in each is written for this field on that file, and the DESCRIPTION stands
   alone if you ever split the project per version.
-- Leave out the source link for now - the GitHub repo has not been created or pushed yet.
+- Source link: https://github.com/4d3mNot/minetunes

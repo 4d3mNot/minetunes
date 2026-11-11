@@ -3,6 +3,8 @@ import com.musicdeck.client.DeckSkin;
 import com.musicdeck.client.HudCanvas;
 import com.musicdeck.client.HudLayout;
 import com.musicdeck.client.JsonLine;
+import com.musicdeck.client.Karaoke;
+import com.musicdeck.client.KaraokeLayout;
 import com.musicdeck.client.Lyrics;
 import com.musicdeck.client.LyricsCache;
 import com.musicdeck.client.LyricsFetcher;
@@ -28,7 +30,7 @@ import java.util.List;
  * font is measured in the preview render.
  *
  *   javac -encoding UTF-8 -d out tools/CheckHud.java \
- *     src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine,DeckSkin,DeckLibrary}.java
+ *     src/client/java/com/musicdeck/client/{HudCanvas,HudLayout,NowPlaying,Palette,JsonLine,DeckSkin,DeckLibrary,Lyrics,LyricsLibrary,LyricsCache,LyricsLayout,LyricsFetcher,Karaoke,KaraokeLayout}.java
  *   java -cp out CheckHud
  */
 public final class CheckHud {
@@ -2047,17 +2049,25 @@ public final class CheckHud {
 		Recorder lyFull = new Recorder();
 		LyricsLayout.draw(lyFull, lyPanel, Palette.GREEN, true);
 		List<Op> lyLines = lyFull.kind("text");
-		expect(lyLines.size() == 3, "all three lines are drawn, got " + lyLines.size());
+		expect(lyLines.size() == 4,
+			"three rows are painted, the sung one twice so the voice can cut it, got " + lyLines.size());
 		expect(lyLines.get(0).y1() == lyPanel.y() + LyricsLayout.PAD
-			&& lyLines.get(1).y1() == lyLines.get(0).y1() + LyricsLayout.LINE + LyricsLayout.LINE_GAP,
-			"the rows are one line and one gap apart");
-		expect(lyLines.get(0).colour() == Palette.WHITE,
-			"the line being sung is the brightest ink on the panel");
-		expect(lyLines.get(1).colour() != lyLines.get(0).colour()
-			&& lyLines.get(2).colour() == lyLines.get(1).colour(),
-			"the two neighbours share a dimmer ink, so the current line is the only one lit");
-		expect(lyLines.get(0).text().equals("First line") && lyLines.get(1).text().equals("Second line"),
+			&& lyLines.get(1).y1() == lyLines.get(0).y1()
+			&& lyLines.get(2).y1() == lyLines.get(0).y1() + LyricsLayout.LINE + LyricsLayout.LINE_GAP,
+			"the rows are one line and one gap apart, and the two passes of the sung row share a row");
+		expect(lyLines.get(1).colour() == Palette.WHITE && lyLines.get(0).colour() != Palette.WHITE,
+			"the line being sung is painted dim and then bright over itself, which is the sweep");
+		expect(lyLines.get(2).colour() == lyLines.get(0).colour()
+			&& lyLines.get(3).colour() == lyLines.get(0).colour(),
+			"the two neighbours share that dimmer ink, so the current line is the only one lit");
+		expect(lyLines.get(0).text().equals("First line") && lyLines.get(1).text().equals("First line")
+			&& lyLines.get(2).text().equals("Second line"),
 			"the window shows the line the clock is on and the one after it");
+		Op lySweep = lyFull.clipAround(lyLines.get(1));
+		expect(lySweep != null && lySweep.x2() > lyLines.get(1).x1() && lySweep.x2() < lyLines.get(1).x2(),
+			"the bright pass is cut where the voice has reached, not at the end of the line");
+		expect(lyFull.clipAround(lyLines.get(2)) == null && lyFull.clipAround(lyLines.get(3)) == null,
+			"and the neighbours are not cut at all, so exactly one row is being sung");
 		for (Op op : lyLines) {
 			expect(op.x1() >= lyPanel.x() + LyricsLayout.PAD
 				&& op.x2() <= lyPanel.x() + lyPanel.width() - LyricsLayout.PAD,
@@ -2072,7 +2082,7 @@ public final class CheckHud {
 		Recorder lyCut = new Recorder();
 		LyricsLayout.draw(lyCut, lyCapped, Palette.GREEN, true);
 		List<Op> lyCutLines = lyCut.kind("text");
-		expect(lyCutLines.size() == 1 && lyCutLines.get(0).text().endsWith("...")
+		expect(lyCutLines.size() == 2 && lyCutLines.get(0).text().endsWith("...")
 			&& lyRuler.textWidth(lyCutLines.get(0).text()) <= lyCapped.width() - 2 * LyricsLayout.PAD,
 			"a line too wide for the capped panel is cut with dots rather than written over the border, got \""
 				+ (lyCutLines.isEmpty() ? "" : lyCutLines.get(0).text()) + "\"");
@@ -2189,9 +2199,9 @@ public final class CheckHud {
 		LyricsLayout.draw(lyNoBand, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(false, 0.0, false));
 		boolean lyBandDrawn = lyNoBand.kind("fill").stream()
 			.anyMatch(op -> op.x1() == lyPanel.x() + 1 && op.y1() == lyPanel.y() + 2);
-		expect(!lyBandDrawn && lyNoBand.kind("text").size() == 3,
+		expect(!lyBandDrawn && lyNoBand.kind("text").size() == 4,
 			"a panel switched off keeps the words and drops the band, got "
-				+ lyNoBand.kind("text").size() + " lines");
+				+ lyNoBand.kind("text").size() + " runs");
 		Recorder lyHalf = new Recorder();
 		LyricsLayout.draw(lyHalf, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(true, 0.5, false));
 		expect(alphaOf(lyricBand(lyHalf, lyPanel).colour()) == 128,
@@ -2215,13 +2225,13 @@ public final class CheckHud {
 
 		Ink lyInk = new Ink();
 		LyricsLayout.draw(lyInk, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(true, 0.0, false));
-		expect(lyInk.shadows.size() == 3 && lyInk.shadows.get(0)
-			&& !lyInk.shadows.get(1) && !lyInk.shadows.get(2),
-			"on a band only the line being sung takes a shadow, got " + lyInk.shadows);
+		expect(lyInk.shadows.size() == 4 && lyInk.shadows.get(0) && lyInk.shadows.get(1)
+			&& !lyInk.shadows.get(2) && !lyInk.shadows.get(3),
+			"on a band the sung row shadows both of its passes and the neighbours neither, got " + lyInk.shadows);
 		Ink lyBare = new Ink();
 		LyricsLayout.draw(lyBare, lyPanel, Palette.GREEN, true, new LyricsLayout.Style(false, 0.0, false));
-		expect(lyBare.shadows.size() == 3 && !lyBare.shadows.contains(Boolean.FALSE),
-			"with the band gone every line takes one, so a dim neighbour stays readable, got " + lyBare.shadows);
+		expect(lyBare.shadows.size() == 4 && !lyBare.shadows.contains(Boolean.FALSE),
+			"with the band gone every run takes one, so a dim neighbour stays readable, got " + lyBare.shadows);
 
 		// A deck is the custom UI of the card, and the words are part of the card: the band
 		// under them is painted from the same deck's colour, not from the shipped one.
@@ -2405,6 +2415,188 @@ public final class CheckHud {
 		expect(lyFetch.contains("header(\"User-Agent\", AGENT)") && lyFetch.contains("MineTunes"),
 			"the service is told which program is asking");
 		expect(lyFetch.contains("https://lrclib.net"), "and the only host in the file is lrclib.net");
+
+		// --- karaoke: word timings, the sweep, and the stage it is shown on ---
+		Lyrics krWords = Lyrics.parse("[00:10.00]<00:10.00>Hello <00:11.00>world");
+		expect(krWords.lines().size() == 1 && krWords.at(0).timed(),
+			"a line carrying word stamps is read as a timed line");
+		expect(krWords.at(0).text().equals("Hello world") && krWords.at(0).words().size() == 2
+			&& krWords.at(0).words().get(1).start() == 6,
+			"the stamps are boundaries between words, not words themselves, got \""
+				+ krWords.at(0).text() + "\"");
+		expect(Math.abs(krWords.at(0).words().get(1).after() - 1.0) < 1e-9,
+			"and each word's time is an offset from its line, got " + krWords.at(0).words().get(1).after());
+		Lyrics krShifted = Lyrics.parse("[offset:500]\n[00:10.00]<00:10.00>Hello <00:11.00>world");
+		expect(Math.abs(krShifted.at(0).at() - 9.5) < 1e-9
+			&& Math.abs(krShifted.at(0).words().get(1).after() - 1.0) < 1e-9,
+			"an offset moves the line and leaves its words on the same beats");
+		Lyrics krChorus = Lyrics.parse("[00:01.00][00:05.00]<00:01.00>one <00:02.00>two");
+		expect(krChorus.lines().size() == 2 && krChorus.at(0).timed() && !krChorus.at(1).timed(),
+			"a repeated line keeps its word beats the first time and is estimated the second");
+		Lyrics krFold = Lyrics.parse("[00:01.00]<00:01.00>Don\u2019t");
+		expect(krFold.at(0).text().equals("Don't") && krFold.at(0).words().get(0).start() == 0,
+			"a curly apostrophe folds inside a word-stamped line too, got \"" + krFold.at(0).text() + "\"");
+		Lyrics krDots = Lyrics.parse("[00:01.00]<00:01.00>wait\u2026 <00:02.00>more");
+		expect(krDots.at(0).text().equals("wait... more") && krDots.at(0).words().get(1).start() == 8,
+			"an ellipsis that folds into three dots carries the next word's offset with it, got "
+				+ (krDots.at(0).words().size() < 2 ? -1 : krDots.at(0).words().get(1).start()));
+
+		Lyrics krLong = Lyrics.parse("[00:01.00]" + "x".repeat(60) + "\n[00:30.00]next");
+		expect(Math.abs(Karaoke.end(krLong, 0) - 11.5) < 1e-9,
+			"a line followed by a long silence stops when its words are done, got " + Karaoke.end(krLong, 0));
+		Lyrics krTight = Lyrics.parse("[00:01.00]a\n[00:01.20]b");
+		expect(Math.abs(Karaoke.end(krTight, 0) - 1.6) < 1e-9,
+			"two lines stamped too close still each get a moment, got " + Karaoke.end(krTight, 0));
+		Lyrics krLast = Lyrics.parse("[00:01.00]abc");
+		expect(Math.abs(Karaoke.end(krLast, 0) - 2.38) < 1e-9,
+			"the last line is estimated from its own length, got " + Karaoke.end(krLast, 0));
+		Lyrics krSpace = Lyrics.parse("[00:01.00]a b\n[00:30.00]next");
+		expect(Math.abs(Karaoke.end(krSpace, 0) - 2.22) < 1e-9,
+			"a space is not sung, so it does not stretch the estimate, got " + Karaoke.end(krSpace, 0));
+
+		double[] krTimes = Karaoke.times(krWords.at(0), 12.0);
+		expect(krTimes.length == 12 && krTimes[0] == 10.0
+			&& Math.abs(krTimes[6] - 11.0) < 1e-9 && Math.abs(krTimes[11] - 12.0) < 1e-9,
+			"the second word lands on its own stamp, and the line ends where it was told");
+		expect(Math.abs(krTimes[3] - 10.5) < 1e-9,
+			"the letters between two stamps spread over the gap instead of landing on it, got "
+				+ krTimes[3]);
+		boolean krRising = true;
+		for (int index = 1; index < krTimes.length; index++) {
+			krRising &= krTimes[index] >= krTimes[index - 1];
+		}
+
+		expect(krRising, "and the line never goes backwards in time");
+		double[] krPlain = Karaoke.times(new Lyrics.Line(1.0, "a b"), 2.0);
+		expect(Math.abs(krPlain[1] - 1.4) < 1e-9 && Math.abs(krPlain[2] - 1.6) < 1e-9,
+			"with no stamps a space takes half the time of a letter, got "
+				+ krPlain[1] + " and " + krPlain[2]);
+		expect(Karaoke.fraction(krPlain, 1.0) == 0.0 && Karaoke.fraction(krPlain, 2.0) == 3.0
+			&& Math.abs(Karaoke.fraction(krPlain, 1.2) - 0.5) < 1e-9
+			&& Math.abs(Karaoke.fraction(krPlain, 1.5) - 1.5) < 1e-9,
+			"the fraction of the line sung is interpolated inside the character being sung");
+		expect(Karaoke.bright(0.0, 5) == 0 && Karaoke.bright(0.01, 5) == 1
+			&& Karaoke.bright(2.0, 5) == 2 && Karaoke.bright(9.0, 5) == 5,
+			"a character lights the moment the voice reaches it, and nothing past the line");
+		Recorder krRuler = new Recorder();
+		expect(Karaoke.edge(krRuler, "abcd", 0.0, 10) == 10
+			&& Karaoke.edge(krRuler, "abcd", 2.5, 10) == 25
+			&& Karaoke.edge(krRuler, "abcd", 9.0, 10) == 34,
+			"the bright copy stops in the middle of the letter being sung, got "
+				+ Karaoke.edge(krRuler, "abcd", 2.5, 10));
+		Lyrics krGap = Lyrics.parse("[00:10.00]one\n[00:20.00]two");
+		expect(Karaoke.countdown(krGap, 17.5) == 3 && Karaoke.countdown(krGap, 19.2) == 1
+			&& Karaoke.countdown(krGap, 15.0) == 0 && Karaoke.countdown(krGap, 20.0) == 0
+			&& Karaoke.countdown(krGap, 16.5) == 0,
+			"the count-in shows 3, 2, 1 only inside the three seconds before a line");
+
+		expect(lyPanel.seconds() == 12.0,
+			"the painted frame carries the second it was measured for, so two rows cannot disagree");
+		String krPanelSrc = codeOnly(CLIENT_DIR + "LyricsLayout.java");
+		expect(krPanelSrc.contains("Karaoke.times(") && krPanelSrc.contains("Karaoke.edge(")
+			&& krPanelSrc.contains("canvas.clip(textX - 1"),
+			"the panel cuts a bright copy of the sung row at the voice's edge rather than lighting whole rows");
+
+		Lyrics krStage = Lyrics.parse("[00:01.00]Sing it\n[00:06.00]Next line");
+		KaraokeLayout.Stage krMid = KaraokeLayout.stage(krRuler, krStage, 2.0, 640, 360);
+		expect(krMid.scale() == 3,
+			"a line that fits three times over is drawn three times as big, got " + krMid.scale());
+		expect(krMid.current().equals("Sing it") && krMid.next().equals("Next line"),
+			"the stage shows the line being sung and the one after it");
+		expect(krMid.currentX() == (640 / 3 - 42) / 2,
+			"the line is centred in the stage, got " + krMid.currentX());
+		expect(krMid.currentY() == 360 * 44 / 100 / 3,
+			"and sits a little above the middle of the screen, got " + krMid.currentY());
+		expect(krMid.nextY() == krMid.currentY() + LyricsLayout.LINE + KaraokeLayout.NEXT_GAP,
+			"the line after sits one line and a gap under the sung one, got " + krMid.nextY());
+		expect(Math.abs(krMid.fraction() - Karaoke.fraction(
+			Karaoke.times(krStage.at(0), Karaoke.end(krStage, 0)), 2.0)) < 1e-9,
+			"its fill comes from the same clock the panel uses");
+		expect(KaraokeLayout.stage(krRuler, krStage, 0.5, 640, 360) == KaraokeLayout.Stage.EMPTY,
+			"before the first line there is nothing to sing, so nothing is measured");
+		Lyrics krWide = Lyrics.parse("[00:01.00]" + "y".repeat(300));
+		KaraokeLayout.Stage krCut = KaraokeLayout.stage(krRuler, krWide, 2.0, 640, 360);
+		expect(krCut.scale() == 1 && krCut.current().endsWith("...")
+			&& krRuler.textWidth(krCut.current()) <= 640 - 2 * KaraokeLayout.MARGIN,
+			"a line wider than the smallest zoom is cut rather than run off the screen, got \""
+				+ krCut.current() + "\"");
+		KaraokeLayout.Stage krEdge = KaraokeLayout.stage(krRuler,
+			Lyrics.parse("[00:01.00]" + "z".repeat(35)), 2.0, 640, 360);
+		expect(krEdge.scale() == 2,
+			"a line that only just fits at the largest size drops one, because the margin counts too, got "
+				+ krEdge.scale());
+
+		Recorder krPaint = new Recorder();
+		KaraokeLayout.draw(krPaint, krMid, Palette.GREEN, true);
+		List<Op> krOps = krPaint.kind("text");
+		expect(krOps.size() == 6,
+			"the next line once, the sung line once, and one run per lit character, got " + krOps.size());
+		expect(krOps.get(0).text().equals("Next line") && krOps.get(0).y1() == krMid.nextY(),
+			"the line after is drawn once, under the sung one");
+		expect(krOps.get(1).text().equals("Sing it") && krOps.get(1).colour() != Palette.WHITE,
+			"the sung line is laid down dim first");
+		expect(krOps.get(2).text().equals("S") && krOps.get(2).colour() == Palette.WHITE
+			&& krOps.get(3).x1() == krOps.get(2).x1() + 6,
+			"then one bright run per character the voice has reached, left to right");
+		int krLit = 2;
+		while (krLit < krOps.size() && krOps.get(krLit).text().length() == 1) {
+			krLit++;
+		}
+
+		expect(krLit == 2 + Karaoke.bright(krMid.fraction(), krMid.current().length()),
+			"and exactly as many as the clock says, got " + (krLit - 2));
+		Recorder krStill = new Recorder();
+		KaraokeLayout.draw(krStill, krMid, Palette.GREEN, false);
+		expect(krStill.kind("text").get(2).colour() != Palette.WHITE,
+			"a paused track is not lit as though the voice were still on it");
+		KaraokeLayout.Stage krNear = KaraokeLayout.stage(krRuler, krStage, 4.0, 640, 360);
+		Recorder krCount = new Recorder();
+		KaraokeLayout.draw(krCount, krNear, Palette.GREEN, true);
+		expect(krNear.countdown() == 2 && krCount.kind("text").stream()
+			.anyMatch(op -> op.text().equals("2") && op.colour() == Palette.GREEN
+				&& op.y1() == krNear.countdownY()),
+			"a line two seconds away is counted in over the sung one");
+
+		Recorder krChrome = new Recorder();
+		KaraokeLayout.chrome(krChrome, "Brent Faiyaz - Trust", "J or ESC closes", "",
+			640, 360, Palette.GREEN);
+		Op krWash = krChrome.kind("fill").get(0);
+		expect(krWash.x1() == 0 && krWash.y1() == 0 && krWash.x2() == 640 && krWash.y2() == 360
+			&& alphaOf(krWash.colour()) > 0,
+			"the stage dims the whole window rather than blurring it a second time");
+		List<Op> krChromeText = krChrome.kind("text");
+		expect(krChromeText.size() == 2 && krChromeText.get(0).y1() == KaraokeLayout.HEADER_Y
+			&& krChromeText.get(1).y1() == 360 - KaraokeLayout.HINT_Y - LyricsLayout.LINE,
+			"the track is named at the top and the way out at the bottom");
+		expect(krChromeText.get(0).x1() == (640 - krRuler.textWidth("Brent Faiyaz - Trust")) / 2,
+			"and both are centred");
+		Recorder krEmpty = new Recorder();
+		KaraokeLayout.chrome(krEmpty, "", "", "Nothing is playing.", 640, 360, Palette.GREEN);
+		List<Op> krNone = krEmpty.kind("text");
+		expect(krNone.size() == 1 && krNone.get(0).text().equals("Nothing is playing.")
+			&& krNone.get(0).y1() == (360 - LyricsLayout.LINE) / 2,
+			"with nothing to sing the message takes the middle");
+
+		String krScreenSrc = codeOnly(CLIENT_DIR + "KaraokeScreen.java");
+		expect(!krScreenSrc.contains("renderBackground") && krScreenSrc.contains("return false;")
+			&& krScreenSrc.contains("InputConstants.KEY_J"),
+			"the karaoke screen dims once, never pauses the world, and J is the way back out");
+		expect(krScreenSrc.contains("extractRenderState(") && !krScreenSrc.contains("void render("),
+			"and it paints through 26.x's extractRenderState, not the old render override");
+		expect(krScreenSrc.contains("hud.wordsFor(playing)") && krScreenSrc.contains("hud.accent(playing)")
+			&& krScreenSrc.contains("pose().scale(stage.scale()"),
+			"the screen reads the panel's own words and colour, and zooms the stage");
+		String krClientSrc = codeOnly(CLIENT_DIR + "MusicDeckClient.java");
+		expect(krClientSrc.contains("KEY_J") && krClientSrc.contains("instanceof KaraokeScreen")
+			&& krClientSrc.contains("settingsKey, karaokeKey")
+			&& krClientSrc.contains("karaokeKey.consumeClick()"),
+			"J opens it and closes it, and the card keeps off the stage");
+		expect(codeOnly(CLIENT_DIR + "MusicDeckCommand.java").contains("literal(\"karaoke\")"),
+			"/music karaoke reaches the same view");
+		String krHudSrc = codeOnly(CLIENT_DIR + "NowPlayingHud.java");
+		expect(krHudSrc.contains("public Lyrics wordsFor(") && krHudSrc.contains("public int accent(NowPlaying")
+			&& count(krHudSrc, "skin.accentOr(") == 1,
+			"the card and the stage decide the colour in one place");
 
 		for (java.nio.file.Path lyTemp : List.of(lyFolder, lyLoose, lyTitle, lyUtf8, lyLegacy, lySeed,
 			lyCacheDir, lyFetchDir, lyPlainDir, lyOnlineDir)) {
